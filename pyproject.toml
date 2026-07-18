@@ -1,0 +1,4 @@
+[tool.pytest.ini_options]
+markers = [
+    "slow: marks tests that hit external APIs (deselect with '-m \"not slow\"')"
+]
