@@ -23,8 +23,12 @@ def get_sp500_constituents() -> pd.DataFrame:
 
     Returns DataFrame with columns: ticker, date_added
     """
+    from io import StringIO
+
     url = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
-    tables = pd.read_html(url)
+    resp = requests.get(url, headers={"User-Agent": "Mozilla/5.0"})
+    resp.raise_for_status()
+    tables = pd.read_html(StringIO(resp.text))
     df = tables[0]
     df["Symbol"] = df["Symbol"].str.replace(".", "-", regex=False)
     constituents = df[["Symbol", "Date added"]].rename(

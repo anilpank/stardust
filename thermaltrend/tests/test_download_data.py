@@ -34,7 +34,9 @@ def sample_wikipedia_table():
 
 class TestGetSp500Constituents:
     @patch("download_data.pd.read_html")
-    def test_returns_dataframe_with_expected_columns(self, mock_read_html, sample_wikipedia_table):
+    @patch("download_data.requests.get")
+    def test_returns_dataframe_with_expected_columns(self, mock_get, mock_read_html, sample_wikipedia_table):
+        mock_get.return_value = MagicMock(text="<html></html>")
         mock_read_html.return_value = [sample_wikipedia_table]
 
         result = get_sp500_constituents()
@@ -43,7 +45,9 @@ class TestGetSp500Constituents:
         assert len(result) == 4
 
     @patch("download_data.pd.read_html")
-    def test_replaces_dots_with_hyphens(self, mock_read_html, sample_wikipedia_table):
+    @patch("download_data.requests.get")
+    def test_replaces_dots_with_hyphens(self, mock_get, mock_read_html, sample_wikipedia_table):
+        mock_get.return_value = MagicMock(text="<html></html>")
         mock_read_html.return_value = [sample_wikipedia_table]
 
         result = get_sp500_constituents()
@@ -52,17 +56,22 @@ class TestGetSp500Constituents:
         assert "BRK.B" not in result["ticker"].tolist()
 
     @patch("download_data.pd.read_html")
-    def test_calls_wikipedia_url(self, mock_read_html, sample_wikipedia_table):
+    @patch("download_data.requests.get")
+    def test_calls_wikipedia_url(self, mock_get, mock_read_html, sample_wikipedia_table):
+        mock_get.return_value = MagicMock(text="<html></html>")
         mock_read_html.return_value = [sample_wikipedia_table]
 
         get_sp500_constituents()
 
-        mock_read_html.assert_called_once_with(
-            "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
+        mock_get.assert_called_once_with(
+            "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies",
+            headers={"User-Agent": "Mozilla/5.0"},
         )
 
     @patch("download_data.pd.read_html")
-    def test_preserves_date_added(self, mock_read_html, sample_wikipedia_table):
+    @patch("download_data.requests.get")
+    def test_preserves_date_added(self, mock_get, mock_read_html, sample_wikipedia_table):
+        mock_get.return_value = MagicMock(text="<html></html>")
         mock_read_html.return_value = [sample_wikipedia_table]
 
         result = get_sp500_constituents()
