@@ -33,13 +33,6 @@ python download_data.py --output ./my_data
 
 Data is saved to `thermaltrend/data/equities/` by default. Already-downloaded tickers are skipped automatically.
 
-### Hello Test
-
-```bash
-cd thermaltrend
-python hello.py
-```
-
 ## Running Tests
 
 Install test dependency:
