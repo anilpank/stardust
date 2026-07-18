@@ -1,0 +1,2 @@
+# stardust
+Trading strategy system
