@@ -71,7 +71,7 @@ def main():
         "--tickers", nargs="+", default=None,
         help="Specific tickers to download (default: all S&P 500)",
     )
-    parser.add_argument("--start", default="2015-01-01", help="Start date (YYYY-MM-DD)")
+    parser.add_argument("--start", default="1970-01-01", help="Start date (YYYY-MM-DD)")
     parser.add_argument("--end", default="2026-01-01", help="End date (YYYY-MM-DD)")
     parser.add_argument(
         "--output", default=str(DATA_DIR / "equities"),

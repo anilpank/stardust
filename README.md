@@ -18,7 +18,7 @@ Downloads S&P 500 historical OHLCV data as Parquet files:
 ```bash
 cd thermaltrend
 
-# Download all S&P 500 stocks (default: 2015-01-01 to 2026-01-01)
+# Download all S&P 500 stocks (default: 1970-01-01 to 2026-01-01)
 python download_data.py
 
 # Download specific tickers
