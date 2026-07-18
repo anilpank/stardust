@@ -1,0 +1,10 @@
+repos:
+  - repo: local
+    hooks:
+      - id: unit-tests
+        name: Run unit tests
+        entry: python -m pytest thermaltrend/tests/ -m "not slow" -q
+        language: system
+        types: [python]
+        pass_filenames: false
+        always_run: true
