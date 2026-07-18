@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 import pandas as pd
 import pytest
 
-from download_data import download_and_save, get_sp500_tickers
+from download_data import download_and_save, get_sp500_constituents, get_sp500_tickers, get_universe
 
 
 @pytest.fixture
@@ -22,37 +22,106 @@ def sample_ohlcv():
     )
 
 
-class TestGetSp500Tickers:
+@pytest.fixture
+def sample_wikipedia_table():
+    return pd.DataFrame(
+        {
+            "Symbol": ["AAPL", "MSFT", "GOOGL", "BRK.B"],
+            "Date added": ["1982-11-30", "1976-03-31", "2006-04-03", "2010-02-16"],
+        }
+    )
+
+
+class TestGetSp500Constituents:
     @patch("download_data.pd.read_html")
-    def test_returns_list_of_strings(self, mock_read_html):
-        df = pd.DataFrame({"Symbol": ["AAPL", "MSFT", "GOOGL"]})
-        mock_read_html.return_value = [df]
+    def test_returns_dataframe_with_expected_columns(self, mock_read_html, sample_wikipedia_table):
+        mock_read_html.return_value = [sample_wikipedia_table]
+
+        result = get_sp500_constituents()
+
+        assert list(result.columns) == ["ticker", "date_added"]
+        assert len(result) == 4
+
+    @patch("download_data.pd.read_html")
+    def test_replaces_dots_with_hyphens(self, mock_read_html, sample_wikipedia_table):
+        mock_read_html.return_value = [sample_wikipedia_table]
+
+        result = get_sp500_constituents()
+
+        assert "BRK-B" in result["ticker"].tolist()
+        assert "BRK.B" not in result["ticker"].tolist()
+
+    @patch("download_data.pd.read_html")
+    def test_calls_wikipedia_url(self, mock_read_html, sample_wikipedia_table):
+        mock_read_html.return_value = [sample_wikipedia_table]
+
+        get_sp500_constituents()
+
+        mock_read_html.assert_called_once_with(
+            "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
+        )
+
+    @patch("download_data.pd.read_html")
+    def test_preserves_date_added(self, mock_read_html, sample_wikipedia_table):
+        mock_read_html.return_value = [sample_wikipedia_table]
+
+        result = get_sp500_constituents()
+
+        assert result.loc[result["ticker"] == "AAPL", "date_added"].iloc[0] == "1982-11-30"
+        assert result.loc[result["ticker"] == "GOOGL", "date_added"].iloc[0] == "2006-04-03"
+
+
+class TestGetSp500Tickers:
+    @patch("download_data.get_sp500_constituents")
+    def test_returns_list_of_strings(self, mock_constituents):
+        mock_constituents.return_value = pd.DataFrame(
+            {"ticker": ["AAPL", "MSFT", "GOOGL"], "date_added": ["1982-11-30", "1976-03-31", "2006-04-03"]}
+        )
 
         tickers = get_sp500_tickers()
 
         assert tickers == ["AAPL", "MSFT", "GOOGL"]
         assert all(isinstance(t, str) for t in tickers)
 
-    @patch("download_data.pd.read_html")
-    def test_replaces_dots_with_hyphens(self, mock_read_html):
-        df = pd.DataFrame({"Symbol": ["BRK.B", "BF.B"]})
-        mock_read_html.return_value = [df]
-
-        tickers = get_sp500_tickers()
-
-        assert "BRK-B" in tickers
-        assert "BF-B" in tickers
-
-    @patch("download_data.pd.read_html")
-    def test_calls_wikipedia_url(self, mock_read_html):
-        df = pd.DataFrame({"Symbol": ["AAPL"]})
-        mock_read_html.return_value = [df]
+    @patch("download_data.get_sp500_constituents")
+    def test_delegates_to_constituents(self, mock_constituents):
+        mock_constituents.return_value = pd.DataFrame(
+            {"ticker": ["AAPL"], "date_added": ["1982-11-30"]}
+        )
 
         get_sp500_tickers()
 
-        mock_read_html.assert_called_once_with(
-            "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
-        )
+        mock_constituents.assert_called_once()
+
+
+class TestGetUniverse:
+    def test_filters_by_date_added(self, tmp_path):
+        csv_content = "ticker,date_added\nAAPL,1982-11-30\nGOOGL,2006-04-03\nAMZN,2005-11-18\n"
+        (tmp_path / "constituents.csv").write_text(csv_content)
+
+        result = get_universe(tmp_path, "2006-01-01")
+
+        assert "AAPL" in result
+        assert "AMZN" in result
+        assert "GOOGL" not in result
+
+    def test_includes_tickers_added_on_exact_date(self, tmp_path):
+        csv_content = "ticker,date_added\nAAPL,1982-11-30\nGOOGL,2006-04-03\n"
+        (tmp_path / "constituents.csv").write_text(csv_content)
+
+        result = get_universe(tmp_path, "2006-04-03")
+
+        assert "GOOGL" in result
+
+    def test_early_date_returns_original_constituents(self, tmp_path):
+        csv_content = "ticker,date_added\nMMM,1957-03-04\nAAPL,1982-11-30\nGOOGL,2006-04-03\n"
+        (tmp_path / "constituents.csv").write_text(csv_content)
+
+        result = get_universe(tmp_path, "1970-01-01")
+
+        assert "MMM" in result
+        assert "AAPL" not in result
+        assert "GOOGL" not in result
 
 
 class TestDownloadAndSave:

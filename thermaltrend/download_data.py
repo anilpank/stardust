@@ -18,14 +18,38 @@ import yfinance as yf
 DATA_DIR = Path(__file__).parent / "data"
 
 
-def get_sp500_tickers() -> list[str]:
-    """Fetch current S&P 500 constituents from Wikipedia."""
+def get_sp500_constituents() -> pd.DataFrame:
+    """Fetch current S&P 500 constituents with date added from Wikipedia.
+
+    Returns DataFrame with columns: ticker, date_added
+    """
     url = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
     tables = pd.read_html(url)
     df = tables[0]
-    tickers = df["Symbol"].str.replace(".", "-", regex=False).tolist()
-    print(f"Fetched {len(tickers)} S&P 500 tickers from Wikipedia")
-    return tickers
+    df["Symbol"] = df["Symbol"].str.replace(".", "-", regex=False)
+    constituents = df[["Symbol", "Date added"]].rename(
+        columns={"Symbol": "ticker", "Date added": "date_added"}
+    )
+    print(f"Fetched {len(constituents)} S&P 500 constituents from Wikipedia")
+    return constituents
+
+
+def get_sp500_tickers() -> list[str]:
+    """Fetch current S&P 500 tickers from Wikipedia."""
+    return get_sp500_constituents()["ticker"].tolist()
+
+
+def get_universe(data_dir: Path, as_of_date: str) -> list[str]:
+    """Return tickers that were S&P 500 members on as_of_date.
+
+    Args:
+        data_dir: Directory containing constituents.csv
+        as_of_date: Date string (YYYY-MM-DD) to filter by
+    """
+    csv_path = data_dir / "constituents.csv"
+    df = pd.read_csv(csv_path, parse_dates=["date_added"])
+    mask = df["date_added"] <= pd.Timestamp(as_of_date)
+    return df.loc[mask, "ticker"].tolist()
 
 
 def download_and_save(
@@ -79,10 +103,20 @@ def main():
     )
     args = parser.parse_args()
 
-    tickers = args.tickers if args.tickers else get_sp500_tickers()
     output_dir = Path(args.output)
 
-    print(f"Downloading {len(tickers)} tickers ({args.start} to {args.end})")
+    if args.tickers:
+        tickers = args.tickers
+        # When specific tickers are provided, skip constituents CSV
+    else:
+        constituents = get_sp500_constituents()
+        tickers = constituents["ticker"].tolist()
+        # Save constituents manifest for future universe filtering
+        output_dir.mkdir(parents=True, exist_ok=True)
+        constituents.to_csv(output_dir / "constituents.csv", index=False)
+        print(f"Saved constituents.csv ({len(constituents)} tickers)")
+
+    print(f"\nDownloading {len(tickers)} tickers ({args.start} to {args.end})")
     print(f"Saving to: {output_dir}\n")
 
     download_and_save(tickers, args.start, args.end, output_dir)
