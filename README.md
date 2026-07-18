@@ -59,3 +59,4 @@ pytest thermaltrend/tests/ -m "not slow" -v
 ```bash
 pytest thermaltrend/tests/ -v
 ```
+
