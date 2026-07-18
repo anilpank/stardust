@@ -6,7 +6,7 @@ Trading strategy system
 Python 3.12+ with the following packages:
 
 ```
-pip install pandas numpy yfinance requests pyarrow
+pip install pandas numpy yfinance requests pyarrow pytest
 ```
 
 ## Running Scripts
@@ -38,4 +38,24 @@ Data is saved to `thermaltrend/data/equities/` by default. Already-downloaded ti
 ```bash
 cd thermaltrend
 python hello.py
+```
+
+## Running Tests
+
+Install test dependency:
+
+```bash
+pip install pytest
+```
+
+### Unit Tests (fast, no network)
+
+```bash
+pytest thermaltrend/tests/ -m "not slow" -v
+```
+
+### All Tests (includes network calls to Yahoo Finance)
+
+```bash
+pytest thermaltrend/tests/ -v
 ```
