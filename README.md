@@ -20,10 +20,13 @@ thermaltrend/
 │       ├── MSFT.parquet
 │       └── ...
 ├── download_data.py           # Download OHLCV data from Yahoo Finance
+├── update_data.py             # Incrementally update existing Parquet files
 ├── show_start_dates.py        # Show data availability per company
 └── tests/
     ├── test_download_data.py
     ├── test_download_integration.py
+    ├── test_update_data.py
+    ├── test_update_integration.py
     ├── test_show_start_dates.py
     └── test_show_start_dates_integration.py
 ```
@@ -51,6 +54,25 @@ python download_data.py --output ./my_data
 ```
 
 Data is saved to `thermaltrend/data/equities/` by default. Already-downloaded tickers are skipped automatically.
+
+### Update Stock Data
+
+Incrementally updates existing Parquet files with data up to today. Only downloads the missing days since the last available date — no full re-download needed:
+
+```bash
+cd thermaltrend
+
+# Update all existing tickers
+python update_data.py
+
+# Update specific tickers only
+python update_data.py --tickers AAPL MSFT GOOGL
+
+# Custom data directory
+python update_data.py --output ./my_data
+```
+
+Tickers that are already up to date are detected automatically (including weekends and holidays) and skipped without making network requests.
 
 ### Show Start Dates
 
