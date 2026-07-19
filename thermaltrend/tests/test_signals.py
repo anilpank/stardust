@@ -54,8 +54,9 @@ class TestFormatSignalsTable:
     def test_metadata_shown(self):
         signals = [_signal("AAPL", SignalDirection.BUY, 0.8)]
         result = format_signals_table(signals, "test")
-        assert "150.1234" in result
-        assert "145.5678" in result
+        assert "AAPL" in result
+        assert "BUY" in result
+        assert "0.8000" in result
 
 
 class TestSignalsIntegration:

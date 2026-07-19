@@ -10,13 +10,21 @@ Usage:
 from pathlib import Path
 
 from thermaltrend.core.engine import DataEngine
-from thermaltrend.core.strategy import MACrossoverStrategy
+from thermaltrend.core.strategy import (
+    DonchianBreakoutStrategy,
+    MACrossoverStrategy,
+    RSIMeanReversionStrategy,
+)
 from thermaltrend.feed import DataFeed
 
 DEFAULT_DATA_DIR = str(Path(__file__).parent / "data" / "equities")
 
 STRATEGIES = {
     "ma_crossover": lambda: MACrossoverStrategy(fast_period=50, slow_period=200),
+    "donchian": lambda: DonchianBreakoutStrategy(entry_period=20, exit_period=10),
+    "rsi_mean_reversion": lambda: RSIMeanReversionStrategy(
+        period=14, oversold=30.0, overbought=70.0
+    ),
 }
 
 
@@ -27,17 +35,13 @@ def format_signals_table(signals, strategy_name):
 
     lines = [
         f"Signals ({strategy_name})",
-        f"{'Date':12s} {'Ticker':8s} {'Direction':10s} {'Strength':10s} {'Fast MA':>12s} {'Slow MA':>12s}",
-        "-" * 70,
+        f"{'Date':12s} {'Ticker':8s} {'Direction':10s} {'Strength':10s}",
+        "-" * 50,
     ]
     for s in sorted(signals, key=lambda x: x.strength, reverse=True):
-        fast_ma = s.metadata.get("fast_ma", "")
-        slow_ma = s.metadata.get("slow_ma", "")
-        fast_str = f"{fast_ma:>12.4f}" if isinstance(fast_ma, float) else f"{'':>12s}"
-        slow_str = f"{slow_ma:>12.4f}" if isinstance(slow_ma, float) else f"{'':>12s}"
         lines.append(
             f"{s.timestamp.date()!s:12s} {s.ticker:8s} {s.direction.value:10s} "
-            f"{s.strength:>10.4f} {fast_str} {slow_str}"
+            f"{s.strength:>10.4f}"
         )
     return "\n".join(lines)
 

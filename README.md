@@ -16,7 +16,7 @@ pip install pandas numpy yfinance requests pyarrow pytest pre-commit
 thermaltrend/
 ├── core/                          # Event engine
 │   ├── events.py                  # MarketEvent, SignalEvent, EventQueue
-│   ├── strategy.py                # Strategy ABC + MACrossoverStrategy
+│   ├── strategy.py                # Strategy ABC + MACrossover, Donchian, RSI strategies
 │   └── engine.py                  # DataEngine (main event loop)
 ├── analytics/                     # Strategy evaluation & comparison
 │   ├── trade_simulator.py         # SignalEvents → simulated trades (ATR stops, $10K sizing)
@@ -38,7 +38,7 @@ thermaltrend/
 ├── signals.py                     # Generate trading signals from strategy
 └── tests/
     ├── test_events.py             # EventQueue + event type tests
-    ├── test_strategy.py           # MACrossoverStrategy tests
+    ├── test_strategy.py           # Strategy tests (MA, Donchian, RSI)
     ├── test_engine.py             # DataEngine integration tests
     ├── test_signals.py            # Signal output tests
     ├── test_trade_simulator.py    # Trade simulation tests
@@ -171,8 +171,14 @@ python feed.py --head 10
 Runs a strategy on the data feed and outputs ranked trading signals:
 
 ```bash
-# All signals for specific tickers
+# Default strategy (ma_crossover)
 python -m thermaltrend.signals --tickers AAPL MSFT
+
+# Use Donchian breakout strategy
+python -m thermaltrend.signals --strategy donchian --tickers AAPL MSFT
+
+# Use RSI mean reversion strategy
+python -m thermaltrend.signals --strategy rsi_mean_reversion --tickers AAPL MSFT
 
 # Filter by minimum strength and direction
 python -m thermaltrend.signals --min-strength 0.5 --direction BUY
@@ -181,11 +187,13 @@ python -m thermaltrend.signals --min-strength 0.5 --direction BUY
 python -m thermaltrend.signals --start 2024-01-01 --end 2024-12-31
 ```
 
+Available strategies: `ma_crossover`, `donchian`, `rsi_mean_reversion`
+
 Library usage:
 
 ```python
 from thermaltrend.core.engine import DataEngine
-from thermaltrend.core.strategy import MACrossoverStrategy
+from thermaltrend.core.strategy import MACrossoverStrategy, DonchianBreakoutStrategy, RSIMeanReversionStrategy
 from thermaltrend.feed import DataFeed
 
 feed = DataFeed("thermaltrend/data/equities", tickers=["AAPL", "MSFT"])
@@ -204,33 +212,30 @@ Evaluate strategy performance and compare multiple strategies:
 ```python
 from thermaltrend.feed import DataFeed
 from thermaltrend.core.engine import DataEngine
-from thermaltrend.core.strategy import MACrossoverStrategy
+from thermaltrend.core.strategy import MACrossoverStrategy, DonchianBreakoutStrategy, RSIMeanReversionStrategy
 from thermaltrend.analytics.compare import run_strategy_analysis, compare_strategies
 from thermaltrend.analytics.metrics import compute_benchmark_metrics
 from thermaltrend.analytics.report import format_ranking_table
 import pandas as pd
 
-# Run strategy
 feed = DataFeed("thermaltrend/data/equities", tickers=["AAPL", "MSFT", "GOOGL"])
-strategy = MACrossoverStrategy(fast_period=20, slow_period=50)
-engine = DataEngine(feed, strategy)
-signals = engine.run()
 
-# Analyze
-result = run_strategy_analysis(signals, feed._data, "MA 20/50")
-print(f"Win rate: {result['metrics']['win_rate']:.1%}")
-print(f"Total PnL: ${result['metrics']['total_return']:,.2f}")
-print(f"Confidence: {result['confidence']:.2f}")
+strategies = {
+    "MA 50/200": MACrossoverStrategy(50, 200),
+    "Donchian 20/10": DonchianBreakoutStrategy(20, 10),
+    "RSI 14": RSIMeanReversionStrategy(14, 30.0, 70.0),
+}
 
-# Per-ticker breakdown
-for ticker, m in result["per_ticker"].items():
-    print(f"{ticker}: {m['win_rate']:.0%} win rate, ${m['total_pnl']:,.2f}")
+results = {}
+for name, strat in strategies.items():
+    engine = DataEngine(feed, strat)
+    signals = engine.run()
+    result = run_strategy_analysis(signals, feed._data, name)
+    results[name] = {"trades": result["trades"], "equity_curve": result["equity_curve"]}
 
-# Compare multiple strategies with SPY benchmark
+# Compare with SPY benchmark
 spy = pd.read_parquet("thermaltrend/data/equities/SPY.parquet")
 bench = compute_benchmark_metrics(spy, "2023-01-01", "2026-07-19")
-
-results = {"MA 20/50": {"trades": result["trades"], "equity_curve": result["equity_curve"]}}
 ranking = compare_strategies(results, benchmark_metrics=bench)
 print(format_ranking_table(ranking))
 ```
@@ -250,7 +255,7 @@ Event-driven design with 6 layers:
 
 1. **Data Layer** — download, update, inspect Parquet files + DataFeed
 2. **Event Queue** — MarketEvent → SignalEvent flow with strict chronological ordering
-3. **Strategy Engine** — Strategy ABC + MACrossoverStrategy (multi-class strategy library planned)
+3. **Strategy Engine** — Strategy ABC + 3 strategies: MA Crossover, Donchian Breakout, RSI Mean Reversion
 4. **Analytics & Reporting** — Trade simulation, metrics, regime analysis, strategy ranking (built)
 5. **Execution Handler** — simulated fills + live broker bridge (planned)
 6. **Portfolio & Risk** — position sizing, risk management (planned)

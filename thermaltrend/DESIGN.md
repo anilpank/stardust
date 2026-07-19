@@ -2,7 +2,7 @@
 
 **Author:** Anil
 **Date:** July 2026
-**Status:** Phase 1-3 Complete (Data Layer + Event Queue + Signal Generation + Analytics)
+**Status:** Phase 1-3 Partially Complete (Data Layer + Event Queue + Signal Generation + Analytics + 2 Phase 3 strategies)
 
 ---
 
@@ -44,7 +44,7 @@ Six layers, four built:
 |-------|--------|------|
 | Data Layer | Built | Download, update, inspect Parquet files; `DataFeed` yields chronological bars |
 | Event Queue | Built | `MarketEvent` → `SignalEvent` flow via `EventQueue`; `DataEngine` orchestrates |
-| Strategy Engine | Partial | `Strategy` ABC + `MACrossoverStrategy`; needs multi-class strategy library |
+| Strategy Engine | 3 strategies built | `Strategy` ABC + `MACrossoverStrategy`, `DonchianBreakoutStrategy`, `RSIMeanReversionStrategy`; ATR trailing stop, dual momentum, factor scoring planned |
 | Analytics & Reporting | Built | Trade simulation, metrics, regime analysis, strategy ranking, benchmark comparison |
 | Execution Handler | Planned | Simulated fills, slippage models, live broker bridge |
 | Portfolio & Risk | Planned | Position sizing, risk rules, PnL tracking |
@@ -349,11 +349,11 @@ Six layers, four built:
 
 ## 6. What's Next
 
-### Phase 3: Strategy Expansion (Multi-Class)
+### Phase 3: Strategy Expansion (Multi-Class) — Partially Complete
 Implement strategies across multiple classes to cast a wide net:
-- **Trend Following:** Donchian Channel Breakout, ATR Trailing Stop, Adaptive MA (KAMA)
+- **Trend Following:** Donchian Channel Breakout ✅, ATR Trailing Stop (planned), Adaptive MA (KAMA)
 - **Momentum:** Dual Momentum (absolute + relative), Sector Rotation, RSI momentum
-- **Mean Reversion:** RSI-based entries, Bollinger Band bounce
+- **Mean Reversion:** RSI-based entries ✅, Bollinger Band bounce
 - **Factor-Based:** Simple value/quality/momentum factor scoring
 - All strategies share the same `Strategy` ABC interface — plug and play.
 

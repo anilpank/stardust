@@ -2,7 +2,7 @@
 
 ## What This Project Is
 
-An early-stage Python project called **Thermaltrend** — an event-driven backtesting and live-trading system for **testing, validating, and selecting the best performing strategies** on S&P 500 equities. Not limited to trend-following — encompasses momentum, mean reversion, factor-based, and any strategy class that can be plugged into the `Strategy` ABC. The **data acquisition layer**, **data feed**, **event queue with signal generation**, and **analytics & metrics layer** are built.
+An early-stage Python project called **Thermaltrend** — an event-driven backtesting and live-trading system for **testing, validating, and selecting the best performing strategies** on S&P 500 equities. Not limited to trend-following — encompasses momentum, mean reversion, factor-based, and any strategy class that can be plugged into the `Strategy` ABC. The **data acquisition layer**, **data feed**, **event queue with signal generation**, **analytics & metrics layer**, and **multi-class strategy library** (MA Crossover, Donchian Breakout, RSI Mean Reversion) are built.
 
 - **Remote:** https://github.com/anilpank/stardust
 - **Python:** 3.13.5 (uses 3.12+ features like `list[str] | None`)
@@ -18,8 +18,9 @@ The data pipeline, event-driven engine, and analytics module are built. Data is 
 | Parquet files | 502 (501 S&P 500 tickers + SPY) |
 | Data range | 1970 → Jul 19 2026 (varies by ticker) |
 | Columns | Open, High, Low, Close, Volume (auto-adjusted) |
-| Total source code | ~1,970 lines across 14 modules |
-| Total test code | ~2,600 lines across 18 test files (152 unit tests) |
+| Strategies | 3 (MA Crossover, Donchian Breakout, RSI Mean Reversion) |
+| Total source code | ~2,170 lines across 14 modules |
+| Total test code | ~2,860 lines across 18 test files (183 unit tests) |
 | Git commits | 26 |
 
 ## Scripts
@@ -30,7 +31,7 @@ The data pipeline, event-driven engine, and analytics module are built. Data is 
 | `update_data.py` | Incremental update (downloads only missing days) | `cd thermaltrend && python update_data.py` |
 | `show_start_dates.py` | Inspect data availability per ticker | `cd thermaltrend && python show_start_dates.py` |
 | `feed.py` | Load Parquet files as chronological bars (CLI + library) | `cd thermaltrend && python feed.py` |
-| `signals.py` | Generate trading signals from strategy (CLI + library) | `cd thermaltrend && python -m thermaltrend.signals` |
+| `signals.py` | Generate trading signals from strategy (CLI + library) | `cd thermaltrend && python -m thermaltrend.signals --strategy ma_crossover\|donchian\|rsi_mean_reversion` |
 
 All scripts accept `--tickers AAPL MSFT` for specific tickers and `--output PATH` for custom directories.
 
@@ -39,38 +40,41 @@ All scripts accept `--tickers AAPL MSFT` for specific tickers and `--output PATH
 ```python
 from thermaltrend.feed import DataFeed
 from thermaltrend.core.engine import DataEngine
-from thermaltrend.core.strategy import MACrossoverStrategy
+from thermaltrend.core.strategy import MACrossoverStrategy, DonchianBreakoutStrategy, RSIMeanReversionStrategy
 from thermaltrend.analytics.compare import run_strategy_analysis, compare_strategies
 from thermaltrend.analytics.metrics import compute_benchmark_metrics
 from thermaltrend.analytics.report import format_ranking_table, format_per_ticker_table, format_regime_table
 import pandas as pd
 
-# Run strategy
+# Run multiple strategies
 feed = DataFeed("thermaltrend/data/equities", tickers=["AAPL", "MSFT", "GOOGL"], start_date="2023-01-01")
-strategy = MACrossoverStrategy(fast_period=20, slow_period=50)
-engine = DataEngine(feed, strategy)
-signals = engine.run()
+strategies = {
+    "MA 50/200": MACrossoverStrategy(50, 200),
+    "Donchian 20/10": DonchianBreakoutStrategy(20, 10),
+    "RSI 14": RSIMeanReversionStrategy(14, 30.0, 70.0),
+}
 
-# Full analysis
-result = run_strategy_analysis(signals, feed._data, "MA 20/50")
-m = result["metrics"]
-print(f"Win rate: {m['win_rate']:.1%}, PnL: ${m['total_return']:,.2f}, Confidence: {result['confidence']:.2f}")
-
-# Per-ticker breakdown
-for ticker, tm in result["per_ticker"].items():
-    print(f"{ticker}: {tm['win_rate']:.0%} win rate, ${tm['total_pnl']:,.2f}")
+results = {}
+for name, strat in strategies.items():
+    engine = DataEngine(feed, strat)
+    signals = engine.run()
+    result = run_strategy_analysis(signals, feed._data, name)
+    results[name] = {"trades": result["trades"], "equity_curve": result["equity_curve"]}
+    m = result["metrics"]
+    print(f"{name}: {m['total_trades']} trades, {m['win_rate']:.0%} win rate, Sharpe {m['sharpe']:.2f}")
 
 # Compare with SPY benchmark
 spy = pd.read_parquet("thermaltrend/data/equities/SPY.parquet")
 bench = compute_benchmark_metrics(spy, "2023-01-01", "2026-07-19")
-ranking = compare_strategies({"MA 20/50": {"trades": result["trades"], "equity_curve": result["equity_curve"]}}, benchmark_metrics=bench)
+ranking = compare_strategies(results, benchmark_metrics=bench)
 print(format_ranking_table(ranking))
 
-# Regime analysis
+# Regime analysis (per strategy)
 from thermaltrend.analytics.regime import classify_regime, compute_regime_metrics
 regimes = classify_regime(spy["Close"])
-regime_m = compute_regime_metrics(result["trades"], regimes)
-print(format_regime_table(regime_m, "MA 20/50"))
+for name, result in results.items():
+    regime_m = compute_regime_metrics(result["trades"], regimes)
+    print(format_regime_table(regime_m, name))
 ```
 
 ## Testing
@@ -81,11 +85,15 @@ pytest thermaltrend/tests/ -m "not slow" -v
 
 # Integration tests (hit Yahoo Finance)
 pytest thermaltrend/tests/ -v
+
+# Run specific strategy
+python -m thermaltrend.signals --strategy donchian --tickers AAPL MSFT --start 2024-01-01
+python -m thermaltrend.signals --strategy rsi_mean_reversion --tickers AAPL MSFT --start 2024-01-01
 ```
 
 Test files:
 - `tests/test_events.py` — EventQueue, MarketEvent, SignalEvent (17 tests)
-- `tests/test_strategy.py` — MACrossoverStrategy (8 tests)
+- `tests/test_strategy.py` — MACrossoverStrategy, DonchianBreakoutStrategy, RSIMeanReversionStrategy (26 tests)
 - `tests/test_engine.py` — DataEngine integration (6 tests)
 - `tests/test_signals.py` — signals.py CLI + formatting (6 tests)
 - `tests/test_trade_simulator.py` — Trade simulation with ATR stops (11 tests)
@@ -106,7 +114,7 @@ Pre-commit hook: `.pre-commit-config.yaml` runs `pytest -m "not slow" -q` on eve
 | `thermaltrend/feed.py` | `DataFeed` class + `Bar` dataclass — loads Parquet files, yields bars chronologically |
 | `thermaltrend/signals.py` | Signal output CLI — runs strategy on data feed, outputs ranked trading signals |
 | `thermaltrend/core/events.py` | Event types (`MarketEvent`, `SignalEvent`) and `EventQueue` (deque-based FIFO) |
-| `thermaltrend/core/strategy.py` | Strategy ABC + `MACrossoverStrategy` (50/200 MA crossover) |
+| `thermaltrend/core/strategy.py` | Strategy ABC + `MACrossoverStrategy`, `DonchianBreakoutStrategy`, `RSIMeanReversionStrategy` |
 | `thermaltrend/core/engine.py` | `DataEngine` — main event loop connecting DataFeed → Strategy → Signals |
 | `thermaltrend/analytics/trade_simulator.py` | Converts SignalEvents into simulated Trades with ATR stops, $10K sizing |
 | `thermaltrend/analytics/metrics.py` | CAGR, Sharpe, Sortino, MaxDD, Calmar, win rate, profit factor, confidence score |
@@ -137,12 +145,12 @@ The planned system has 6 layers:
 
 1. **Data Layer** ← built (download, update, inspect scripts + `DataFeed` for event-driven consumption)
 2. **Event Queue** ← built (MarketEvent, SignalEvent, EventQueue + DataEngine + MACrossoverStrategy + signals CLI)
-3. **Strategy Engine** ← partially built (Strategy ABC + MACrossoverStrategy; multi-class strategy library needed: Donchian breakout, ATR trailing stop, momentum, mean reversion, factor scoring)
+3. **Strategy Engine** ← 3 of ~6 strategies built (MACrossoverStrategy, DonchianBreakoutStrategy, RSIMeanReversionStrategy); ATR trailing stop, dual momentum, factor scoring still planned
 4. **Analytics & Reporting** ← built (trade simulation, metrics, regime analysis, strategy ranking, benchmark comparison)
 5. **Execution Handler** (simulated + live broker bridge)
 6. **Portfolio & Risk** (position sizing, risk management)
 
-Implemented directory structure: `thermaltrend/` with `core/` (events, strategy, engine), `analytics/` (trade_simulator, metrics, regime, compare, report), `data/`, `tests/`. Future: `strategy/`, `portfolio/`, `execution/`, `utils/` subpackages.
+Implemented directory structure: `thermaltrend/` with `core/` (events, strategy, engine), `analytics/` (trade_simulator, metrics, regime, compare, report), `data/`, `tests/`. Future: `portfolio/`, `execution/`, `utils/` subpackages.
 
 ## Dependencies
 
@@ -173,4 +181,4 @@ result = run_strategy_analysis(signals, feed._data, "MA 20/50")
 print(result["metrics"])
 ```
 
-- Check `thermaltrend/DESIGN.md` if planning the next phase of development (multi-class strategy library, strategy comparison framework)
+- Check `thermaltrend/DESIGN.md` if planning the next phase of development (ATR trailing stop, dual momentum, factor scoring strategies)

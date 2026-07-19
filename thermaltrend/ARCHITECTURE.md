@@ -160,8 +160,8 @@ The queue ensures **strictly sequential processing** — no future data leaks.
 The system is strategy-agnostic. Strategies across multiple classes can be plugged into the same engine:
 
 ### Trend Following
-1. **Moving Average Crossover** (SMA/EMA golden cross)
-2. **Donchian Channel Breakout** (new highs -> entry, channel low -> exit)
+1. **Moving Average Crossover** (SMA/EMA golden cross) ✅
+2. **Donchian Channel Breakout** (new highs -> entry, channel low -> exit) ✅
 3. **ATR Trailing Stop** (trend entry + volatility-based trailing stop)
 4. **Adaptive Moving Average** (Kaufman's KAMA)
 
@@ -171,7 +171,7 @@ The system is strategy-agnostic. Strategies across multiple classes can be plugg
 7. **RSI Momentum** (RSI-based trend continuation entries)
 
 ### Mean Reversion
-8. **RSI Mean Reversion** (oversold/overbought reversals)
+8. **RSI Mean Reversion** (oversold/overbought reversals) ✅
 9. **Bollinger Band Bounce** (revert to mean after band touch)
 
 ### Factor-Based
@@ -180,7 +180,7 @@ The system is strategy-agnostic. Strategies across multiple classes can be plugg
 ### Baseline
 - **S&P 500 Buy-and-Hold** — benchmark to beat
 
-All strategies share the same `Strategy` ABC. The comparison framework (Phase 4) will rank them by risk-adjusted return, robustness, and consistency.
+All strategies share the same `Strategy` ABC. The comparison framework ranks them by risk-adjusted return, robustness, and consistency.
 
 ---
 
