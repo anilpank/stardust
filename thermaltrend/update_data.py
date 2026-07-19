@@ -10,6 +10,7 @@ Usage:
 """
 
 import argparse
+import gc
 import time
 from datetime import timedelta
 from pathlib import Path
@@ -82,6 +83,8 @@ def update_ticker(ticker: str, data_dir: Path) -> str:
     except Exception as e:
         print(f"  {ticker} - FAILED to download: {e}")
         return "failed"
+    finally:
+        gc.collect()
 
 
 def main():
