@@ -22,13 +22,16 @@ thermaltrend/
 ├── download_data.py           # Download OHLCV data from Yahoo Finance
 ├── update_data.py             # Incrementally update existing Parquet files
 ├── show_start_dates.py        # Show data availability per company
+├── feed.py                    # Data feed: load Parquet files as chronological bars
 └── tests/
     ├── test_download_data.py
     ├── test_download_integration.py
     ├── test_update_data.py
     ├── test_update_integration.py
     ├── test_show_start_dates.py
-    └── test_show_start_dates_integration.py
+    ├── test_show_start_dates_integration.py
+    ├── test_feed.py
+    └── test_feed_integration.py
 ```
 
 ## Running Scripts
@@ -92,6 +95,53 @@ python show_start_dates.py --sort rows
 
 # Export results to CSV
 python show_start_dates.py --csv start_dates.csv
+```
+
+### Data Feed
+
+Loads Parquet files and yields bars in strict chronological order for event-driven backtesting:
+
+```python
+from thermaltrend.feed import DataFeed
+
+feed = DataFeed("thermaltrend/data/equities")
+
+# Iterate all bars
+for bar in feed:
+    print(bar.ticker, bar.date, bar.close)
+
+# Filter by tickers
+feed = DataFeed("thermaltrend/data/equities", tickers=["AAPL", "MSFT"])
+
+# Filter by date range
+feed = DataFeed("thermaltrend/data/equities", start_date="2024-01-01", end_date="2024-12-31")
+
+# All bars for a single date
+bars = feed.get_bars_for_date("2024-01-02")
+
+# Full history for one ticker (returns DataFrame)
+df = feed.get_ticker_history("AAPL")
+```
+
+CLI usage:
+
+```bash
+cd thermaltrend
+
+# Summary
+python feed.py
+
+# Filter tickers
+python feed.py --tickers AAPL MSFT
+
+# All bars for a date
+python feed.py --date 2024-01-02
+
+# Full history for a ticker
+python feed.py --ticker-history AAPL
+
+# First N bars
+python feed.py --head 10
 ```
 
 ## Running Tests
