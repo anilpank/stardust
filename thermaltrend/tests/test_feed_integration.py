@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from feed import DataFeed
+from thermaltrend.feed import DataFeed
 
 THERMALTREND_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = THERMALTREND_DIR / "data" / "equities"

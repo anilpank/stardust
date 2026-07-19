@@ -1,5 +1,6 @@
 # stardust
-Trading strategy system
+
+Event-driven backtesting system for trend-following strategies on S&P 500 equities.
 
 ## Prerequisites
 
@@ -13,25 +14,34 @@ pip install pandas numpy yfinance requests pyarrow pytest pre-commit
 
 ```
 thermaltrend/
+├── core/                          # Event engine
+│   ├── events.py                  # MarketEvent, SignalEvent, EventQueue
+│   ├── strategy.py                # Strategy ABC + MACrossoverStrategy
+│   └── engine.py                  # DataEngine (main event loop)
 ├── data/
-│   └── equities/              # Parquet files for each S&P 500 ticker
-│       ├── constituents.csv   # S&P 500 members with date added
+│   └── equities/                  # Parquet files for each S&P 500 ticker
+│       ├── constituents.csv       # S&P 500 members with date added
 │       ├── AAPL.parquet
 │       ├── MSFT.parquet
 │       └── ...
-├── download_data.py           # Download OHLCV data from Yahoo Finance
-├── update_data.py             # Incrementally update existing Parquet files
-├── show_start_dates.py        # Show data availability per company
-├── feed.py                    # Data feed: load Parquet files as chronological bars
+├── download_data.py               # Download OHLCV data from Yahoo Finance
+├── update_data.py                 # Incrementally update existing Parquet files
+├── show_start_dates.py            # Show data availability per company
+├── feed.py                        # Data feed: load Parquet files as chronological bars
+├── signals.py                     # Generate trading signals from strategy
 └── tests/
+    ├── test_events.py             # EventQueue + event type tests
+    ├── test_strategy.py           # MACrossoverStrategy tests
+    ├── test_engine.py             # DataEngine integration tests
+    ├── test_signals.py            # Signal output tests
+    ├── test_feed.py
+    ├── test_feed_integration.py
     ├── test_download_data.py
     ├── test_download_integration.py
     ├── test_update_data.py
     ├── test_update_integration.py
     ├── test_show_start_dates.py
-    ├── test_show_start_dates_integration.py
-    ├── test_feed.py
-    └── test_feed_integration.py
+    └── test_show_start_dates_integration.py
 ```
 
 ## Running Scripts
@@ -144,13 +154,49 @@ python feed.py --ticker-history AAPL
 python feed.py --head 10
 ```
 
-## Running Tests
+### Signal Generation
 
-Install test dependency:
+Runs a strategy on the data feed and outputs ranked trading signals:
 
 ```bash
-pip install pytest
+# All signals for specific tickers
+python -m thermaltrend.signals --tickers AAPL MSFT
+
+# Filter by minimum strength and direction
+python -m thermaltrend.signals --min-strength 0.5 --direction BUY
+
+# Custom date range
+python -m thermaltrend.signals --start 2024-01-01 --end 2024-12-31
 ```
+
+Library usage:
+
+```python
+from thermaltrend.core.engine import DataEngine
+from thermaltrend.core.strategy import MACrossoverStrategy
+from thermaltrend.feed import DataFeed
+
+feed = DataFeed("thermaltrend/data/equities", tickers=["AAPL", "MSFT"])
+strategy = MACrossoverStrategy(fast_period=50, slow_period=200)
+engine = DataEngine(feed, strategy)
+
+signals = engine.run()
+for s in signals:
+    print(f"{s.timestamp.date()} {s.ticker} {s.direction.value} {s.strength:.4f}")
+```
+
+## Architecture
+
+Event-driven design with 6 layers:
+
+1. **Data Layer** — download, update, inspect Parquet files + DataFeed
+2. **Event Queue** — MarketEvent → SignalEvent flow with strict chronological ordering
+3. **Strategy Engine** — Strategy ABC + MACrossoverStrategy (more strategies planned)
+4. **Execution Handler** — simulated fills + live broker bridge (planned)
+5. **Portfolio & Risk** — position sizing, risk management (planned)
+6. **Analytics & Reporting** — Sharpe, drawdown, tearsheet (planned)
+
+## Running Tests
 
 ### Unit Tests (fast, no network)
 

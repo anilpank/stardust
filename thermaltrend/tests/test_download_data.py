@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 import pandas as pd
 import pytest
 
-from download_data import download_and_save, get_sp500_constituents, get_sp500_tickers, get_universe
+from thermaltrend.download_data import download_and_save, get_sp500_constituents, get_sp500_tickers, get_universe
 
 
 @pytest.fixture
@@ -33,8 +33,8 @@ def sample_wikipedia_table():
 
 
 class TestGetSp500Constituents:
-    @patch("download_data.pd.read_html")
-    @patch("download_data.requests.get")
+    @patch("thermaltrend.download_data.pd.read_html")
+    @patch("thermaltrend.download_data.requests.get")
     def test_returns_dataframe_with_expected_columns(self, mock_get, mock_read_html, sample_wikipedia_table):
         mock_get.return_value = MagicMock(text="<html></html>")
         mock_read_html.return_value = [sample_wikipedia_table]
@@ -44,8 +44,8 @@ class TestGetSp500Constituents:
         assert list(result.columns) == ["ticker", "date_added"]
         assert len(result) == 4
 
-    @patch("download_data.pd.read_html")
-    @patch("download_data.requests.get")
+    @patch("thermaltrend.download_data.pd.read_html")
+    @patch("thermaltrend.download_data.requests.get")
     def test_replaces_dots_with_hyphens(self, mock_get, mock_read_html, sample_wikipedia_table):
         mock_get.return_value = MagicMock(text="<html></html>")
         mock_read_html.return_value = [sample_wikipedia_table]
@@ -55,8 +55,8 @@ class TestGetSp500Constituents:
         assert "BRK-B" in result["ticker"].tolist()
         assert "BRK.B" not in result["ticker"].tolist()
 
-    @patch("download_data.pd.read_html")
-    @patch("download_data.requests.get")
+    @patch("thermaltrend.download_data.pd.read_html")
+    @patch("thermaltrend.download_data.requests.get")
     def test_calls_wikipedia_url(self, mock_get, mock_read_html, sample_wikipedia_table):
         mock_get.return_value = MagicMock(text="<html></html>")
         mock_read_html.return_value = [sample_wikipedia_table]
@@ -68,8 +68,8 @@ class TestGetSp500Constituents:
             headers={"User-Agent": "Mozilla/5.0"},
         )
 
-    @patch("download_data.pd.read_html")
-    @patch("download_data.requests.get")
+    @patch("thermaltrend.download_data.pd.read_html")
+    @patch("thermaltrend.download_data.requests.get")
     def test_preserves_date_added(self, mock_get, mock_read_html, sample_wikipedia_table):
         mock_get.return_value = MagicMock(text="<html></html>")
         mock_read_html.return_value = [sample_wikipedia_table]
@@ -81,7 +81,7 @@ class TestGetSp500Constituents:
 
 
 class TestGetSp500Tickers:
-    @patch("download_data.get_sp500_constituents")
+    @patch("thermaltrend.download_data.get_sp500_constituents")
     def test_returns_list_of_strings(self, mock_constituents):
         mock_constituents.return_value = pd.DataFrame(
             {"ticker": ["AAPL", "MSFT", "GOOGL"], "date_added": ["1982-11-30", "1976-03-31", "2006-04-03"]}
@@ -92,7 +92,7 @@ class TestGetSp500Tickers:
         assert tickers == ["AAPL", "MSFT", "GOOGL"]
         assert all(isinstance(t, str) for t in tickers)
 
-    @patch("download_data.get_sp500_constituents")
+    @patch("thermaltrend.download_data.get_sp500_constituents")
     def test_delegates_to_constituents(self, mock_constituents):
         mock_constituents.return_value = pd.DataFrame(
             {"ticker": ["AAPL"], "date_added": ["1982-11-30"]}
@@ -138,13 +138,13 @@ class TestDownloadAndSave:
         existing = tmp_path / "AAPL.parquet"
         existing.touch()
 
-        with patch("download_data.yf") as mock_yf:
+        with patch("thermaltrend.download_data.yf") as mock_yf:
             download_and_save(["AAPL"], "2024-01-01", "2024-01-06", tmp_path)
 
             mock_yf.download.assert_not_called()
 
-    @patch("download_data.time.sleep")
-    @patch("download_data.yf")
+    @patch("thermaltrend.download_data.time.sleep")
+    @patch("thermaltrend.download_data.yf")
     def test_downloads_and_saves_parquet(self, mock_yf, mock_sleep, tmp_path, sample_ohlcv):
         mock_yf.download.return_value = sample_ohlcv
 
@@ -157,8 +157,8 @@ class TestDownloadAndSave:
         assert len(saved) == 5
         assert "Close" in saved.columns
 
-    @patch("download_data.time.sleep")
-    @patch("download_data.yf")
+    @patch("thermaltrend.download_data.time.sleep")
+    @patch("thermaltrend.download_data.yf")
     def test_handles_empty_data(self, mock_yf, mock_sleep, tmp_path):
         mock_yf.download.return_value = pd.DataFrame()
 
@@ -166,8 +166,8 @@ class TestDownloadAndSave:
 
         assert not (tmp_path / "NODATA.parquet").exists()
 
-    @patch("download_data.time.sleep")
-    @patch("download_data.yf")
+    @patch("thermaltrend.download_data.time.sleep")
+    @patch("thermaltrend.download_data.yf")
     def test_handles_download_exception(self, mock_yf, mock_sleep, tmp_path):
         mock_yf.download.side_effect = Exception("Network error")
 
@@ -175,8 +175,8 @@ class TestDownloadAndSave:
 
         assert not (tmp_path / "FAIL.parquet").exists()
 
-    @patch("download_data.time.sleep")
-    @patch("download_data.yf")
+    @patch("thermaltrend.download_data.time.sleep")
+    @patch("thermaltrend.download_data.yf")
     def test_flattens_multiindex_columns(self, mock_yf, mock_sleep, tmp_path):
         dates = pd.date_range("2024-01-01", periods=3, freq="D")
         multi = pd.DataFrame(
@@ -195,8 +195,8 @@ class TestDownloadAndSave:
         saved = pd.read_parquet(tmp_path / "AAPL.parquet")
         assert list(saved.columns) == ["Close", "Volume"]
 
-    @patch("download_data.time.sleep")
-    @patch("download_data.yf")
+    @patch("thermaltrend.download_data.time.sleep")
+    @patch("thermaltrend.download_data.yf")
     def test_creates_output_directory(self, mock_yf, mock_sleep, tmp_path, sample_ohlcv):
         mock_yf.download.return_value = sample_ohlcv
         out_dir = tmp_path / "nested" / "data"
@@ -206,8 +206,8 @@ class TestDownloadAndSave:
         assert out_dir.exists()
         assert (out_dir / "AAPL.parquet").exists()
 
-    @patch("download_data.time.sleep")
-    @patch("download_data.yf")
+    @patch("thermaltrend.download_data.time.sleep")
+    @patch("thermaltrend.download_data.yf")
     def test_multiple_tickers(self, mock_yf, mock_sleep, tmp_path, sample_ohlcv):
         mock_yf.download.return_value = sample_ohlcv
 

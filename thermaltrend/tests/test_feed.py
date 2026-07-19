@@ -4,7 +4,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from feed import Bar, DataFeed
+from thermaltrend.feed import Bar, DataFeed
 
 
 @pytest.fixture

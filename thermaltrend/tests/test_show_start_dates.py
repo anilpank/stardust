@@ -4,7 +4,7 @@ from unittest.mock import patch
 import pandas as pd
 import pytest
 
-from show_start_dates import main
+from thermaltrend.show_start_dates import main
 
 
 @pytest.fixture
@@ -31,7 +31,7 @@ def sample_parquet(tmp_path):
 
 class TestShowStartDates:
     def test_reads_all_parquet_files(self, sample_parquet, capsys):
-        with patch("show_start_dates.DATA_DIR", sample_parquet):
+        with patch("thermaltrend.show_start_dates.DATA_DIR", sample_parquet):
             with patch("sys.argv", ["show_start_dates.py"]):
                 main()
 
@@ -41,7 +41,7 @@ class TestShowStartDates:
         assert "Total companies: 2" in output
 
     def test_shows_correct_start_dates(self, sample_parquet, capsys):
-        with patch("show_start_dates.DATA_DIR", sample_parquet):
+        with patch("thermaltrend.show_start_dates.DATA_DIR", sample_parquet):
             with patch("sys.argv", ["show_start_dates.py"]):
                 main()
 
@@ -50,7 +50,7 @@ class TestShowStartDates:
         assert "1990-03-26" in output
 
     def test_sort_by_start_ascending(self, sample_parquet, capsys):
-        with patch("show_start_dates.DATA_DIR", sample_parquet):
+        with patch("thermaltrend.show_start_dates.DATA_DIR", sample_parquet):
             with patch("sys.argv", ["show_start_dates.py", "--sort", "start"]):
                 main()
 
@@ -60,7 +60,7 @@ class TestShowStartDates:
         assert msft_pos < aapl_pos
 
     def test_sort_by_ticker(self, sample_parquet, capsys):
-        with patch("show_start_dates.DATA_DIR", sample_parquet):
+        with patch("thermaltrend.show_start_dates.DATA_DIR", sample_parquet):
             with patch("sys.argv", ["show_start_dates.py", "--sort", "ticker"]):
                 main()
 
@@ -70,7 +70,7 @@ class TestShowStartDates:
         assert aapl_pos < msft_pos
 
     def test_sort_by_rows_descending(self, sample_parquet, capsys):
-        with patch("show_start_dates.DATA_DIR", sample_parquet):
+        with patch("thermaltrend.show_start_dates.DATA_DIR", sample_parquet):
             with patch("sys.argv", ["show_start_dates.py", "--sort", "rows"]):
                 main()
 
@@ -80,7 +80,7 @@ class TestShowStartDates:
 
     def test_csv_export(self, sample_parquet, tmp_path):
         csv_path = tmp_path / "out.csv"
-        with patch("show_start_dates.DATA_DIR", sample_parquet):
+        with patch("thermaltrend.show_start_dates.DATA_DIR", sample_parquet):
             with patch("sys.argv", ["show_start_dates.py", "--csv", str(csv_path)]):
                 main()
 
@@ -94,7 +94,7 @@ class TestShowStartDates:
 
     def test_csv_content_matches_output(self, sample_parquet, tmp_path, capsys):
         csv_path = tmp_path / "out.csv"
-        with patch("show_start_dates.DATA_DIR", sample_parquet):
+        with patch("thermaltrend.show_start_dates.DATA_DIR", sample_parquet):
             with patch("sys.argv", ["show_start_dates.py", "--csv", str(csv_path)]):
                 main()
 
@@ -110,7 +110,7 @@ class TestShowStartDates:
         good_df.index.name = "Date"
         good_df.to_parquet(tmp_path / "GOOD.parquet")
 
-        with patch("show_start_dates.DATA_DIR", tmp_path):
+        with patch("thermaltrend.show_start_dates.DATA_DIR", tmp_path):
             with patch("sys.argv", ["show_start_dates.py"]):
                 main()
 
@@ -119,7 +119,7 @@ class TestShowStartDates:
         assert "Total companies: 2" in output
 
     def test_empty_directory(self, tmp_path, capsys):
-        with patch("show_start_dates.DATA_DIR", tmp_path):
+        with patch("thermaltrend.show_start_dates.DATA_DIR", tmp_path):
             with patch("sys.argv", ["show_start_dates.py"]):
                 main()
 
@@ -132,7 +132,7 @@ class TestShowStartDates:
         df.index.name = "Date"
         df.to_parquet(tmp_path / "TSLA.parquet")
 
-        with patch("show_start_dates.DATA_DIR", tmp_path):
+        with patch("thermaltrend.show_start_dates.DATA_DIR", tmp_path):
             with patch("sys.argv", ["show_start_dates.py"]):
                 main()
 
@@ -142,7 +142,7 @@ class TestShowStartDates:
         assert "Total companies: 1" in output
 
     def test_header_and_summary_printed(self, sample_parquet, capsys):
-        with patch("show_start_dates.DATA_DIR", sample_parquet):
+        with patch("thermaltrend.show_start_dates.DATA_DIR", sample_parquet):
             with patch("sys.argv", ["show_start_dates.py"]):
                 main()
 

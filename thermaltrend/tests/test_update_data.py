@@ -4,7 +4,7 @@ from unittest.mock import patch
 import pandas as pd
 import pytest
 
-from update_data import get_existing_tickers, update_ticker
+from thermaltrend.update_data import get_existing_tickers, update_ticker
 
 
 @pytest.fixture
@@ -82,8 +82,8 @@ class TestUpdateTicker:
             index=new_dates,
         )
 
-        with patch("update_data.yf") as mock_yf, \
-             patch("update_data.pd.Timestamp.now") as mock_now:
+        with patch("thermaltrend.update_data.yf") as mock_yf, \
+             patch("thermaltrend.update_data.pd.Timestamp.now") as mock_now:
             mock_now.return_value = pd.Timestamp("2024-01-09")
             mock_yf.download.return_value = new_data
 
@@ -108,8 +108,8 @@ class TestUpdateTicker:
     def test_empty_download_returns_up_to_date(self, tmp_path, sample_ohlcv):
         _write_parquet(tmp_path, "AAPL", sample_ohlcv)
 
-        with patch("update_data.yf") as mock_yf, \
-             patch("update_data.pd.Timestamp.now") as mock_now:
+        with patch("thermaltrend.update_data.yf") as mock_yf, \
+             patch("thermaltrend.update_data.pd.Timestamp.now") as mock_now:
             mock_now.return_value = pd.Timestamp("2024-01-10")
             mock_yf.download.return_value = pd.DataFrame()
 
@@ -120,8 +120,8 @@ class TestUpdateTicker:
     def test_download_error_returns_failed(self, tmp_path, sample_ohlcv):
         _write_parquet(tmp_path, "AAPL", sample_ohlcv)
 
-        with patch("update_data.yf") as mock_yf, \
-             patch("update_data.pd.Timestamp.now") as mock_now:
+        with patch("thermaltrend.update_data.yf") as mock_yf, \
+             patch("thermaltrend.update_data.pd.Timestamp.now") as mock_now:
             mock_now.return_value = pd.Timestamp("2024-01-10")
             mock_yf.download.side_effect = Exception("Network error")
 
@@ -152,8 +152,8 @@ class TestUpdateTicker:
             index=overlap_dates,
         )
 
-        with patch("update_data.yf") as mock_yf, \
-             patch("update_data.pd.Timestamp.now") as mock_now:
+        with patch("thermaltrend.update_data.yf") as mock_yf, \
+             patch("thermaltrend.update_data.pd.Timestamp.now") as mock_now:
             mock_now.return_value = pd.Timestamp("2024-01-09")
             mock_yf.download.return_value = overlap_data
 
@@ -182,8 +182,8 @@ class TestUpdateTicker:
             multi.columns, names=["Price", "Ticker"]
         )
 
-        with patch("update_data.yf") as mock_yf, \
-             patch("update_data.pd.Timestamp.now") as mock_now:
+        with patch("thermaltrend.update_data.yf") as mock_yf, \
+             patch("thermaltrend.update_data.pd.Timestamp.now") as mock_now:
             mock_now.return_value = pd.Timestamp("2024-01-09")
             mock_yf.download.return_value = multi
 
@@ -208,8 +208,8 @@ class TestUpdateTicker:
             index=same_dates,
         )
 
-        with patch("update_data.yf") as mock_yf, \
-             patch("update_data.pd.Timestamp.now") as mock_now:
+        with patch("thermaltrend.update_data.yf") as mock_yf, \
+             patch("thermaltrend.update_data.pd.Timestamp.now") as mock_now:
             mock_now.return_value = pd.Timestamp("2024-01-09")
             mock_yf.download.return_value = same_data
 

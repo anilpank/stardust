@@ -18,8 +18,8 @@ The data pipeline is complete: download, update, and inspect daily OHLCV data fo
 | Parquet files | 501 tickers |
 | Data range | 1970 → Jul 19 2026 (varies by ticker) |
 | Columns | Open, High, Low, Close, Volume (auto-adjusted) |
-| Total source code | ~470 lines across 4 modules |
-| Total test code | ~1100 lines across 9 test files |
+| Total source code | ~750 lines across 8 modules |
+| Total test code | ~1500 lines across 13 test files |
 | Git commits | 20 |
 
 ## Scripts
@@ -30,6 +30,7 @@ The data pipeline is complete: download, update, and inspect daily OHLCV data fo
 | `update_data.py` | Incremental update (downloads only missing days) | `cd thermaltrend && python update_data.py` |
 | `show_start_dates.py` | Inspect data availability per ticker | `cd thermaltrend && python show_start_dates.py` |
 | `feed.py` | Load Parquet files as chronological bars (CLI + library) | `cd thermaltrend && python feed.py` |
+| `signals.py` | Generate trading signals from strategy (CLI + library) | `cd thermaltrend && python -m thermaltrend.signals` |
 
 All scripts accept `--tickers AAPL MSFT` for specific tickers and `--output PATH` for custom directories.
 
@@ -43,6 +44,12 @@ pytest thermaltrend/tests/ -m "not slow" -v
 pytest thermaltrend/tests/ -v
 ```
 
+New test files for the event system:
+- `tests/test_events.py` — EventQueue, MarketEvent, SignalEvent (17 tests)
+- `tests/test_strategy.py` — MACrossoverStrategy (8 tests)
+- `tests/test_engine.py` — DataEngine integration (6 tests)
+- `tests/test_signals.py` — signals.py CLI + formatting (6 tests)
+
 Pre-commit hook: `.pre-commit-config.yaml` runs `pytest -m "not slow" -q` on every `git commit`.
 
 ## Key Files to Know
@@ -53,6 +60,10 @@ Pre-commit hook: `.pre-commit-config.yaml` runs `pytest -m "not slow" -q` on eve
 | `thermaltrend/update_data.py` | Incremental update with `gc.collect()` fix for file descriptor leak |
 | `thermaltrend/show_start_dates.py` | Data availability inspector |
 | `thermaltrend/feed.py` | `DataFeed` class + `Bar` dataclass — loads Parquet files, yields bars chronologically for event-driven backtesting |
+| `thermaltrend/signals.py` | Signal output CLI — runs strategy on data feed, outputs ranked trading signals |
+| `thermaltrend/core/events.py` | Event types (`MarketEvent`, `SignalEvent`) and `EventQueue` (deque-based FIFO) |
+| `thermaltrend/core/strategy.py` | Strategy ABC + `MACrossoverStrategy` (50/200 MA crossover) |
+| `thermaltrend/core/engine.py` | `DataEngine` — main event loop connecting DataFeed → Strategy → Signals |
 | `thermaltrend/ARCHITECTURE.md` | Detailed design doc for the full system (6-layer event-driven architecture) |
 | `thermaltrend/data/equities/constituents.csv` | S&P 500 member list with `date_added` for universe filtering |
 | `pyproject.toml` | Minimal — only defines pytest `slow` marker |
@@ -73,8 +84,8 @@ Pre-commit hook: `.pre-commit-config.yaml` runs `pytest -m "not slow" -q` on eve
 The planned system has 6 layers:
 
 1. **Data Layer** ← built (download, update, inspect scripts + `DataFeed` for event-driven consumption)
-2. **Event Queue** (MarketEvent, SignalEvent, OrderEvent, FillEvent)
-3. **Strategy Engine** (trend-following: MA crossover, Donchian breakout, ATR trailing stop, etc.)
+2. **Event Queue** ← built (MarketEvent, SignalEvent, EventQueue + DataEngine + MACrossoverStrategy + signals CLI)
+3. **Strategy Engine** ← partially built (Strategy ABC + MACrossoverStrategy; more strategies needed: Donchian breakout, ATR trailing stop, etc.)
 4. **Execution Handler** (simulated + live broker bridge)
 5. **Portfolio & Risk** (position sizing, risk management)
 6. **Analytics & Reporting**
@@ -90,7 +101,8 @@ pip install pandas numpy yfinance requests pyarrow pytest pre-commit
 ## If Starting a New Session
 
 - Run `git log --oneline -5` to see recent commits
-- Run `pytest thermaltrend/tests/ -m "not slow" -v` to confirm tests pass (61 unit tests)
+- Run `pytest thermaltrend/tests/ -m "not slow" -v` to confirm tests pass (98 unit tests)
 - Run `python thermaltrend/update_data.py --tickers AAPL` to verify the data pipeline works
 - Run `python thermaltrend/feed.py` to verify the data feed loads correctly
+- Run `python -m thermaltrend.signals --tickers AAPL MSFT --start 2024-01-01` to verify signal generation works
 - Check `thermaltrend/ARCHITECTURE.md` if planning the next phase of development
