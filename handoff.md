@@ -2,7 +2,7 @@
 
 ## What This Project Is
 
-An early-stage Python project called **Thermaltrend** — planned to become an event-driven backtesting and live-trading system for **testing, validating, and selecting the best performing strategies** on S&P 500 equities. Not limited to trend-following — encompasses momentum, mean reversion, factor-based, and any strategy class that can be plugged into the `Strategy` ABC. The **data acquisition layer**, **data feed**, and **event queue with signal generation** are built.
+An early-stage Python project called **Thermaltrend** — an event-driven backtesting and live-trading system for **testing, validating, and selecting the best performing strategies** on S&P 500 equities. Not limited to trend-following — encompasses momentum, mean reversion, factor-based, and any strategy class that can be plugged into the `Strategy` ABC. The **data acquisition layer**, **data feed**, **event queue with signal generation**, and **analytics & metrics layer** are built.
 
 - **Remote:** https://github.com/anilpank/stardust
 - **Python:** 3.13.5 (uses 3.12+ features like `list[str] | None`)
@@ -11,16 +11,16 @@ An early-stage Python project called **Thermaltrend** — planned to become an e
 
 ## Current State
 
-The data pipeline and event-driven engine are built. Data is stored as individual Parquet files in `thermaltrend/data/equities/`. A `DataFeed` class loads these files and yields bars in strict chronological order. The `EventQueue` processes MarketEvents through a Strategy to produce SignalEvents, which can be viewed via the `signals.py` CLI tool.
+The data pipeline, event-driven engine, and analytics module are built. Data is stored as individual Parquet files in `thermaltrend/data/equities/` (501 S&P 500 tickers + SPY). A `DataFeed` class loads these files and yields bars in strict chronological order. The `EventQueue` processes MarketEvents through a Strategy to produce SignalEvents. The analytics module converts signals into simulated trades, computes performance metrics (CAGR, Sharpe, Sortino, MaxDD, win rate, confidence), and produces ranking tables with SPY buy-and-hold benchmark.
 
 | Metric | Value |
 |--------|-------|
-| Parquet files | 501 tickers |
+| Parquet files | 502 (501 S&P 500 tickers + SPY) |
 | Data range | 1970 → Jul 19 2026 (varies by ticker) |
 | Columns | Open, High, Low, Close, Volume (auto-adjusted) |
-| Total source code | ~750 lines across 8 modules |
-| Total test code | ~1500 lines across 13 test files |
-| Git commits | 23 |
+| Total source code | ~1,970 lines across 14 modules |
+| Total test code | ~2,600 lines across 18 test files (152 unit tests) |
+| Git commits | 26 |
 
 ## Scripts
 
@@ -34,6 +34,45 @@ The data pipeline and event-driven engine are built. Data is stored as individua
 
 All scripts accept `--tickers AAPL MSFT` for specific tickers and `--output PATH` for custom directories.
 
+## Analytics Usage
+
+```python
+from thermaltrend.feed import DataFeed
+from thermaltrend.core.engine import DataEngine
+from thermaltrend.core.strategy import MACrossoverStrategy
+from thermaltrend.analytics.compare import run_strategy_analysis, compare_strategies
+from thermaltrend.analytics.metrics import compute_benchmark_metrics
+from thermaltrend.analytics.report import format_ranking_table, format_per_ticker_table, format_regime_table
+import pandas as pd
+
+# Run strategy
+feed = DataFeed("thermaltrend/data/equities", tickers=["AAPL", "MSFT", "GOOGL"], start_date="2023-01-01")
+strategy = MACrossoverStrategy(fast_period=20, slow_period=50)
+engine = DataEngine(feed, strategy)
+signals = engine.run()
+
+# Full analysis
+result = run_strategy_analysis(signals, feed._data, "MA 20/50")
+m = result["metrics"]
+print(f"Win rate: {m['win_rate']:.1%}, PnL: ${m['total_return']:,.2f}, Confidence: {result['confidence']:.2f}")
+
+# Per-ticker breakdown
+for ticker, tm in result["per_ticker"].items():
+    print(f"{ticker}: {tm['win_rate']:.0%} win rate, ${tm['total_pnl']:,.2f}")
+
+# Compare with SPY benchmark
+spy = pd.read_parquet("thermaltrend/data/equities/SPY.parquet")
+bench = compute_benchmark_metrics(spy, "2023-01-01", "2026-07-19")
+ranking = compare_strategies({"MA 20/50": {"trades": result["trades"], "equity_curve": result["equity_curve"]}}, benchmark_metrics=bench)
+print(format_ranking_table(ranking))
+
+# Regime analysis
+from thermaltrend.analytics.regime import classify_regime, compute_regime_metrics
+regimes = classify_regime(spy["Close"])
+regime_m = compute_regime_metrics(result["trades"], regimes)
+print(format_regime_table(regime_m, "MA 20/50"))
+```
+
 ## Testing
 
 ```bash
@@ -44,11 +83,16 @@ pytest thermaltrend/tests/ -m "not slow" -v
 pytest thermaltrend/tests/ -v
 ```
 
-New test files for the event system:
+Test files:
 - `tests/test_events.py` — EventQueue, MarketEvent, SignalEvent (17 tests)
 - `tests/test_strategy.py` — MACrossoverStrategy (8 tests)
 - `tests/test_engine.py` — DataEngine integration (6 tests)
 - `tests/test_signals.py` — signals.py CLI + formatting (6 tests)
+- `tests/test_trade_simulator.py` — Trade simulation with ATR stops (11 tests)
+- `tests/test_metrics.py` — Metric calculations, confidence, benchmark (15 tests)
+- `tests/test_regime.py` — Regime detection and breakdown (7 tests)
+- `tests/test_compare.py` — Strategy ranking and comparison (6 tests)
+- `tests/test_report.py` — Terminal, JSON, CSV output (15 tests)
 
 Pre-commit hook: `.pre-commit-config.yaml` runs `pytest -m "not slow" -q` on every `git commit`.
 
@@ -59,12 +103,18 @@ Pre-commit hook: `.pre-commit-config.yaml` runs `pytest -m "not slow" -q` on eve
 | `thermaltrend/download_data.py` | Full data download with `yfinance` |
 | `thermaltrend/update_data.py` | Incremental update with `gc.collect()` fix for file descriptor leak |
 | `thermaltrend/show_start_dates.py` | Data availability inspector |
-| `thermaltrend/feed.py` | `DataFeed` class + `Bar` dataclass — loads Parquet files, yields bars chronologically for event-driven backtesting |
+| `thermaltrend/feed.py` | `DataFeed` class + `Bar` dataclass — loads Parquet files, yields bars chronologically |
 | `thermaltrend/signals.py` | Signal output CLI — runs strategy on data feed, outputs ranked trading signals |
 | `thermaltrend/core/events.py` | Event types (`MarketEvent`, `SignalEvent`) and `EventQueue` (deque-based FIFO) |
 | `thermaltrend/core/strategy.py` | Strategy ABC + `MACrossoverStrategy` (50/200 MA crossover) |
 | `thermaltrend/core/engine.py` | `DataEngine` — main event loop connecting DataFeed → Strategy → Signals |
-| `thermaltrend/ARCHITECTURE.md` | Detailed design doc for the full system (6-layer event-driven architecture) |
+| `thermaltrend/analytics/trade_simulator.py` | Converts SignalEvents into simulated Trades with ATR stops, $10K sizing |
+| `thermaltrend/analytics/metrics.py` | CAGR, Sharpe, Sortino, MaxDD, Calmar, win rate, profit factor, confidence score |
+| `thermaltrend/analytics/regime.py` | Market regime detection (BULL/BEAR/SIDEWAYS) + per-regime metrics |
+| `thermaltrend/analytics/compare.py` | Multi-strategy ranking with SPY buy-and-hold baseline |
+| `thermaltrend/analytics/report.py` | Terminal table + JSON + CSV export |
+| `thermaltrend/DESIGN.md` | Design document with all design decisions |
+| `thermaltrend/ARCHITECTURE.md` | Detailed architecture proposal for the full system (6 layers) |
 | `thermaltrend/data/equities/constituents.csv` | S&P 500 member list with `date_added` for universe filtering |
 | `pyproject.toml` | Minimal — only defines pytest `slow` marker |
 | `.pre-commit-config.yaml` | Pre-commit hook for unit tests |
@@ -79,6 +129,8 @@ Pre-commit hook: `.pre-commit-config.yaml` runs `pytest -m "not slow" -q` on eve
 
 4. **Parquet schema:** Files have a residual Pandas MultiIndex level name `Price` in metadata (yfinance artifact). The OHLCV columns are `Open, High, Low, Close, Volume` with `Date` as the index.
 
+5. **Analytics assumes next-day execution:** Trade simulator enters/exits at next day's open. If a signal fires on the last day of data, the trade is closed at that day's close with `exit_reason="data_end"`.
+
 ## Architecture Vision (from ARCHITECTURE.md)
 
 The planned system has 6 layers:
@@ -86,11 +138,11 @@ The planned system has 6 layers:
 1. **Data Layer** ← built (download, update, inspect scripts + `DataFeed` for event-driven consumption)
 2. **Event Queue** ← built (MarketEvent, SignalEvent, EventQueue + DataEngine + MACrossoverStrategy + signals CLI)
 3. **Strategy Engine** ← partially built (Strategy ABC + MACrossoverStrategy; multi-class strategy library needed: Donchian breakout, ATR trailing stop, momentum, mean reversion, factor scoring)
-4. **Execution Handler** (simulated + live broker bridge)
-5. **Portfolio & Risk** (position sizing, risk management)
-6. **Analytics & Reporting** ← will include strategy comparison, ranking, walk-forward validation
+4. **Analytics & Reporting** ← built (trade simulation, metrics, regime analysis, strategy ranking, benchmark comparison)
+5. **Execution Handler** (simulated + live broker bridge)
+6. **Portfolio & Risk** (position sizing, risk management)
 
-Implemented directory structure: `thermaltrend/` with `core/` (events, strategy, engine), `data/`, `tests/`. Future: `strategy/`, `portfolio/`, `execution/`, `analytics/`, `utils/` subpackages.
+Implemented directory structure: `thermaltrend/` with `core/` (events, strategy, engine), `analytics/` (trade_simulator, metrics, regime, compare, report), `data/`, `tests/`. Future: `strategy/`, `portfolio/`, `execution/`, `utils/` subpackages.
 
 ## Dependencies
 
@@ -101,8 +153,24 @@ pip install pandas numpy yfinance requests pyarrow pytest pre-commit
 ## If Starting a New Session
 
 - Run `git log --oneline -5` to see recent commits
-- Run `pytest thermaltrend/tests/ -m "not slow" -v` to confirm tests pass (98 unit tests)
+- Run `pytest thermaltrend/tests/ -m "not slow" -v` to confirm tests pass (152 unit tests)
 - Run `python thermaltrend/update_data.py --tickers AAPL` to verify the data pipeline works
 - Run `python thermaltrend/feed.py` to verify the data feed loads correctly
 - Run `python -m thermaltrend.signals --tickers AAPL MSFT --start 2024-01-01` to verify signal generation works
-- Check `thermaltrend/ARCHITECTURE.md` if planning the next phase of development (multi-class strategy library, strategy comparison framework)
+- Try the analytics:
+
+```python
+from thermaltrend.feed import DataFeed
+from thermaltrend.core.engine import DataEngine
+from thermaltrend.core.strategy import MACrossoverStrategy
+from thermaltrend.analytics.compare import run_strategy_analysis
+
+feed = DataFeed("thermaltrend/data/equities", tickers=["AAPL", "MSFT"], start_date="2024-01-01")
+strategy = MACrossoverStrategy(fast_period=20, slow_period=50)
+engine = DataEngine(feed, strategy)
+signals = engine.run()
+result = run_strategy_analysis(signals, feed._data, "MA 20/50")
+print(result["metrics"])
+```
+
+- Check `thermaltrend/DESIGN.md` if planning the next phase of development (multi-class strategy library, strategy comparison framework)

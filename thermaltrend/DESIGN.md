@@ -2,7 +2,7 @@
 
 **Author:** Anil
 **Date:** July 2026
-**Status:** Phase 1-2 Complete (Data Layer + Event Queue + Signal Generation)
+**Status:** Phase 1-3 Complete (Data Layer + Event Queue + Signal Generation + Analytics)
 
 ---
 
@@ -29,20 +29,25 @@ The system is deliberately designed to be strategy-agnostic. The `Strategy` ABC 
 ## 2. Architecture Overview
 
 ```
-DataFeed ──▶ EventQueue ──▶ Strategy ──▶ SignalEvents ──▶ CLI / User
-(Parquet)    (deque)        (MACross)    (ranked)        (manual trade)
+DataFeed ──▶ EventQueue ──▶ Strategy ──▶ SignalEvents ──▶ TradeSimulator ──▶ Analytics
+(Parquet)    (deque)        (MACross)    (ranked)         (sim trades)     (metrics)
+                                                                            │
+                                                              ┌─────────────┼─────────────┐
+                                                              ▼             ▼             ▼
+                                                          Per-Ticker    Regime        Compare
+                                                          Breakdown    Analysis      (ranking)
 ```
 
-Six layers planned, two built:
+Six layers, four built:
 
 | Layer | Status | What |
 |-------|--------|------|
 | Data Layer | Built | Download, update, inspect Parquet files; `DataFeed` yields chronological bars |
 | Event Queue | Built | `MarketEvent` → `SignalEvent` flow via `EventQueue`; `DataEngine` orchestrates |
 | Strategy Engine | Partial | `Strategy` ABC + `MACrossoverStrategy`; needs multi-class strategy library |
+| Analytics & Reporting | Built | Trade simulation, metrics, regime analysis, strategy ranking, benchmark comparison |
 | Execution Handler | Planned | Simulated fills, slippage models, live broker bridge |
 | Portfolio & Risk | Planned | Position sizing, risk rules, PnL tracking |
-| Analytics | Planned | Sharpe, max drawdown, tearsheet, benchmark comparison, **strategy ranking & selection** |
 
 ---
 
@@ -166,6 +171,55 @@ Six layers planned, two built:
 
 **Trade-off:** No cross-ticker queries without loading all files. DuckDB could query across Parquet files directly, but adds a dependency. We load everything into a combined DataFrame at startup anyway.
 
+### 3.8 ATR-Based Stop Loss (Analytics)
+
+**Decision:** Configurable ATR-based stop loss (default 2× ATR, 14-day lookback) alongside strategy-generated exits.
+
+**Alternatives considered:**
+- **No stop** — rely purely on strategy SELL signals for exits
+- **Fixed percentage stop** (e.g., -10% per trade)
+- **ATR-based stop** — adapts to each stock's actual volatility
+
+**Why ATR-based:**
+- Fixed percentage stops are arbitrary — 10% on a low-vol stock like JNJ is very different from 10% on NVDA.
+- ATR measures the stock's actual daily price range. A 2× ATR stop means "exit if the trade moves against you by twice the stock's normal daily volatility."
+- Standard in professional trend-following systems (turtle trading, Van Tharp's position sizing).
+- Configurable: `stop_atr_multiple=0.0` disables stops entirely for pure strategy-signal exits.
+
+**Trade-off:** ATR adds a lookback dependency (14 days). Stocks with less than 14 days of history won't have ATR computed — we fall back to no stop for those.
+
+### 3.9 Next-Day Open Entry/Exit (Analytics)
+
+**Decision:** Simulate trade entry and exit at the next day's open price after a signal fires.
+
+**Alternatives considered:**
+- **Same-day close** — enter at the close of the day the signal fires
+- **Next-day open** — enter at the open of the following trading day
+- **Next-day VWAP** — more realistic but requires intraday data
+
+**Why next-day open:**
+- In reality, you see the signal after market close and place an order at next day's open.
+- Same-day close is unrealistic — you can't act on a signal you haven't seen yet.
+- Next-day open avoids lookahead bias: the strategy at time T only uses data up to T, and the trade executes at T+1.
+
+**Trade-off:** If next day gaps up significantly (e.g., earnings), the entry price is worse than the signal day's close. This is realistic — it's the same slippage you'd face in live trading.
+
+### 3.10 Confidence Score (Analytics)
+
+**Decision:** Composite 0.0–1.0 confidence score based on sample size, win rate consistency, return distribution, and ticker diversity.
+
+**What it measures:** How trustworthy are the backtest results? A strategy with 5 trades and 80% win rate is less statistically meaningful than one with 200 trades and 55% win rate.
+
+**Components (weighted):**
+- 30% — sample size (enough trades to be meaningful)
+- 25% — win rate consistency (not wildly erratic)
+- 25% — return distribution stability (low coefficient of variation)
+- 20% — ticker diversity (works across multiple tickers, not just one)
+
+**Why composite:** No single metric captures "trustworthiness." A composite score forces you to consider all dimensions. It's a heuristic, not a statistical test — but it's better than ignoring sample quality entirely.
+
+**Trade-off:** The weights are somewhat arbitrary. A more rigorous approach would use bootstrap confidence intervals, but that's overkill for v1.
+
 ---
 
 ## 4. What We Built and Why
@@ -239,6 +293,44 @@ Six layers planned, two built:
 - User may only want BUY signals (not SELL).
 - User may want to filter out weak signals (strength < 0.5) that aren't worth acting on.
 
+### 4.7 Trade Simulator (`analytics/trade_simulator.py`)
+
+**Why a separate simulator instead of extending the engine:**
+- The engine produces signals; the simulator consumes them. Different responsibilities.
+- The simulator needs price data for entry/exit prices and ATR computation — the engine doesn't hold this.
+- Separation allows running the simulator independently (e.g., on saved signal files in the future).
+
+**Why pair BUY/SELL signals per ticker:**
+- Each ticker is independent. A BUY on AAPL and a SELL on MSFT are unrelated trades.
+- Within a ticker, signals must alternate: BUY → SELL → BUY → SELL. The simulator enforces this.
+
+**Why unmatched BUYs close at last price:**
+- The backtest period is arbitrary. A strategy shouldn't be penalized for "not having a SELL on the exact last day."
+- But the user needs to know: if 40% of trades are unclosed, the metrics aren't trustworthy.
+- `exit_reason="data_end"` lets the user see this in the output and the confidence score penalizes it.
+
+### 4.8 Metrics (`analytics/metrics.py`)
+
+**Why three levels of metrics:**
+- **Aggregate**: the headline numbers (CAGR, Sharpe, win rate). This is what you compare strategies by.
+- **Per-ticker**: which tickers the strategy works on. Critical for understanding if a strategy is robust or just lucky on one stock.
+- **Confidence**: is this result trustworthy? A high Sharpe on 5 trades means nothing.
+
+**Why 4% risk-free rate:**
+- Approximate current T-bill rate. Used in Sharpe/Sortino calculations.
+- Could be made configurable, but 4% is reasonable for 2026.
+
+### 4.9 Regime Analysis (`analytics/regime.py`)
+
+**Why regime analysis matters:**
+- A strategy that makes 20% in bull markets but loses 40% in bear markets is not viable.
+- Regime breakdown reveals hidden risks: "this strategy only works when the market is going up."
+- Informs position sizing: reduce exposure when regime shifts to bear.
+
+**Why 252-day trailing return for classification:**
+- 252 trading days = 1 year. Standard lookback for regime classification.
+- Thresholds (±10%) are conventional: >10% annual return = bull, <-10% = bear.
+
 ---
 
 ## 5. Known Limitations
@@ -247,20 +339,15 @@ Six layers planned, two built:
 |------------|--------|------------|
 | Daily bars only | Can't detect intraday patterns | Sufficient for initial validation; intraday support planned for P6 |
 | No signal persistence | Signals from previous days are lost | Next step: save signals to Parquet |
-| Single strategy | Can't combine signals or compare strategies | Strategy library expansion planned in P3; strategy comparison in P4 |
-| No benchmark comparison | Can't tell if strategy beats S&P 500 | Planned in Analytics layer (P4) |
-| No position sizing | Signals don't include "how much to buy" | Planned in Portfolio layer |
-| No walk-forward validation | Overfitting risk not addressed | Planned in P4 — rolling out-of-sample windows |
+| Single strategy | Can't combine signals or compare strategies | Strategy library expansion planned in P3 |
+| No position sizing beyond fixed $10K | Real portfolio allocation not modeled | Planned in Portfolio layer |
+| No walk-forward validation | Overfitting risk not addressed | Deferred — rolling out-of-sample windows |
+| No slippage/commission modeling | Trade costs not reflected in metrics | Planned with Execution Handler |
 | `gc.collect()` workaround | File descriptor leak is a symptom, not root cause | Acceptable for now; could switch to session-based yfinance usage |
 
 ---
 
 ## 6. What's Next
-
-### Phase 2: Signal Logging + Portfolio Tracking
-- Save signals to Parquet with timestamp, direction, strength, metadata
-- Track which signals were acted on (manual annotation)
-- Record manual trades for PnL calculation
 
 ### Phase 3: Strategy Expansion (Multi-Class)
 Implement strategies across multiple classes to cast a wide net:
@@ -270,19 +357,19 @@ Implement strategies across multiple classes to cast a wide net:
 - **Factor-Based:** Simple value/quality/momentum factor scoring
 - All strategies share the same `Strategy` ABC interface — plug and play.
 
-### Phase 4: Backtesting Framework + Strategy Comparison
-- Compute Sharpe, Sortino, max drawdown, CAGR, Calmar, win rate, profit factor
-- Compare each strategy vs S&P 500 buy-and-hold and vs each other
-- Walk-forward analysis (rolling out-of-sample validation)
-- **Strategy selection:** rank strategies by risk-adjusted return, robustness, and consistency across market regimes
-- Identify the top N strategies to trade; discard the rest
+### Phase 2 (cont.): Signal Logging
+- Save signals to Parquet with timestamp, direction, strength, metadata
+- Track which signals were acted on (manual annotation)
+- Record manual trades for PnL calculation
 
-### Phase 5: Automated Execution
+### Phase 4: Portfolio & Execution
 - Add `OrderEvent` and `FillEvent` to the event system
 - Simulated execution handler with slippage and commission models
+- Position sizing (volatility-targeted, fixed-fractional, Kelly)
+- Risk rules (max drawdown circuit breaker, max position size)
 - Live broker bridge (SAXO/Revolut API)
 
-### Phase 6: Live Deployment
+### Phase 5: Live Deployment
 - Run validated strategies on a paper trading account
 - Gradually transition to live trading with real capital
 - Monitor for strategy degradation (performance decay over time)
@@ -303,3 +390,5 @@ Implement strategies across multiple classes to cast a wide net:
 5. **Trust requires evidence.** Event-driven architecture isn't the simplest approach, but it's the only one that gives confidence that backtest results would replicate in live trading.
 
 6. **Strategy-agnostic beats strategy-specific.** By keeping the `Strategy` ABC generic, we can test any strategy class — trend, momentum, mean reversion, factor-based — without changing the engine. The best strategies will emerge from rigorous comparison, not from choosing a single approach upfront.
+
+7. **Metrics without context are misleading.** A 20% CAGR on 5 trades means nothing. The confidence score, per-ticker breakdown, and regime analysis provide the context needed to trust (or distrust) backtest results.

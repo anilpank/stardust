@@ -18,11 +18,18 @@ thermaltrend/
 │   ├── events.py                  # MarketEvent, SignalEvent, EventQueue
 │   ├── strategy.py                # Strategy ABC + MACrossoverStrategy
 │   └── engine.py                  # DataEngine (main event loop)
+├── analytics/                     # Strategy evaluation & comparison
+│   ├── trade_simulator.py         # SignalEvents → simulated trades (ATR stops, $10K sizing)
+│   ├── metrics.py                 # CAGR, Sharpe, Sortino, MaxDD, Calmar, confidence
+│   ├── regime.py                  # Market regime detection (BULL/BEAR/SIDEWAYS)
+│   ├── compare.py                 # Multi-strategy ranking table with benchmark
+│   └── report.py                  # Terminal table + JSON + CSV export
 ├── data/
-│   └── equities/                  # Parquet files for each S&P 500 ticker
+│   └── equities/                  # Parquet files for each S&P 500 ticker + SPY
 │       ├── constituents.csv       # S&P 500 members with date added
 │       ├── AAPL.parquet
 │       ├── MSFT.parquet
+│       ├── SPY.parquet            # S&P 500 ETF (benchmark)
 │       └── ...
 ├── download_data.py               # Download OHLCV data from Yahoo Finance
 ├── update_data.py                 # Incrementally update existing Parquet files
@@ -34,6 +41,11 @@ thermaltrend/
     ├── test_strategy.py           # MACrossoverStrategy tests
     ├── test_engine.py             # DataEngine integration tests
     ├── test_signals.py            # Signal output tests
+    ├── test_trade_simulator.py    # Trade simulation tests
+    ├── test_metrics.py            # Metric calculation tests
+    ├── test_regime.py             # Regime detection tests
+    ├── test_compare.py            # Strategy comparison tests
+    ├── test_report.py             # Report formatting tests
     ├── test_feed.py
     ├── test_feed_integration.py
     ├── test_download_data.py
@@ -185,16 +197,63 @@ for s in signals:
     print(f"{s.timestamp.date()} {s.ticker} {s.direction.value} {s.strength:.4f}")
 ```
 
+### Analytics & Strategy Comparison
+
+Evaluate strategy performance and compare multiple strategies:
+
+```python
+from thermaltrend.feed import DataFeed
+from thermaltrend.core.engine import DataEngine
+from thermaltrend.core.strategy import MACrossoverStrategy
+from thermaltrend.analytics.compare import run_strategy_analysis, compare_strategies
+from thermaltrend.analytics.metrics import compute_benchmark_metrics
+from thermaltrend.analytics.report import format_ranking_table
+import pandas as pd
+
+# Run strategy
+feed = DataFeed("thermaltrend/data/equities", tickers=["AAPL", "MSFT", "GOOGL"])
+strategy = MACrossoverStrategy(fast_period=20, slow_period=50)
+engine = DataEngine(feed, strategy)
+signals = engine.run()
+
+# Analyze
+result = run_strategy_analysis(signals, feed._data, "MA 20/50")
+print(f"Win rate: {result['metrics']['win_rate']:.1%}")
+print(f"Total PnL: ${result['metrics']['total_return']:,.2f}")
+print(f"Confidence: {result['confidence']:.2f}")
+
+# Per-ticker breakdown
+for ticker, m in result["per_ticker"].items():
+    print(f"{ticker}: {m['win_rate']:.0%} win rate, ${m['total_pnl']:,.2f}")
+
+# Compare multiple strategies with SPY benchmark
+spy = pd.read_parquet("thermaltrend/data/equities/SPY.parquet")
+bench = compute_benchmark_metrics(spy, "2023-01-01", "2026-07-19")
+
+results = {"MA 20/50": {"trades": result["trades"], "equity_curve": result["equity_curve"]}}
+ranking = compare_strategies(results, benchmark_metrics=bench)
+print(format_ranking_table(ranking))
+```
+
+**Analytics features:**
+- **Trade simulation**: Signals → trades with $10K sizing, 2× ATR stop loss, next-day open entry/exit
+- **Aggregate metrics**: CAGR, Sharpe, Sortino, Max Drawdown, Calmar, win rate, profit factor
+- **Per-ticker breakdown**: Which tickers the strategy performs best/worst on
+- **Confidence score**: 0.0–1.0 composite score based on sample size, consistency, and ticker diversity
+- **Market regime analysis**: Performance breakdown by BULL/BEAR/SIDEWAYS regimes
+- **Multi-strategy ranking**: Side-by-side comparison table with SPY buy-and-hold baseline
+- **Export**: Terminal table, JSON, CSV
+
 ## Architecture
 
 Event-driven design with 6 layers:
 
 1. **Data Layer** — download, update, inspect Parquet files + DataFeed
 2. **Event Queue** — MarketEvent → SignalEvent flow with strict chronological ordering
-3. **Strategy Engine** — Strategy ABC + MACrossoverStrategy (trend, momentum, mean reversion, factor strategies planned)
-4. **Execution Handler** — simulated fills + live broker bridge (planned)
-5. **Portfolio & Risk** — position sizing, risk management (planned)
-6. **Analytics & Reporting** — Sharpe, drawdown, tearsheet, strategy ranking & selection (planned)
+3. **Strategy Engine** — Strategy ABC + MACrossoverStrategy (multi-class strategy library planned)
+4. **Analytics & Reporting** — Trade simulation, metrics, regime analysis, strategy ranking (built)
+5. **Execution Handler** — simulated fills + live broker bridge (planned)
+6. **Portfolio & Risk** — position sizing, risk management (planned)
 
 ## Running Tests
 
@@ -219,4 +278,3 @@ pre-commit install
 ```
 
 After installation, unit tests (excluding slow integration tests) run automatically before each commit. If any test fails, the commit is blocked until the issue is fixed.
-

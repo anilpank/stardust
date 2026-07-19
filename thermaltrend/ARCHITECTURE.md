@@ -131,10 +131,13 @@ The queue ensures **strictly sequential processing** — no future data leaks.
 
 ### Analytics
 
-- **Core metrics**: Sharpe, Sortino, Calmar, max drawdown, win rate, profit factor, CAGR, volatility
-- **Benchmark comparison**: Alpha, beta, information ratio vs S&P 500
-- **Report generation**: HTML tearsheet (similar to Pyfolio output)
-- **Walk-forward analysis**: Rolling out-of-sample validation
+- **Core metrics**: Sharpe, Sortino, Calmar, max drawdown, win rate, profit factor, CAGR, volatility — built
+- **Benchmark comparison**: SPY buy-and-hold baseline with CAGR, Sharpe, MaxDD — built
+- **Per-ticker breakdown**: which tickers the strategy performs best/worst on — built
+- **Confidence score**: 0.0–1.0 composite score based on sample size, consistency, ticker diversity — built
+- **Market regime analysis**: BULL/BEAR/SIDEWAYS performance breakdown — built
+- **Report generation**: Terminal table + JSON + CSV export — built
+- **Walk-forward analysis**: Rolling out-of-sample validation (deferred)
 
 ---
 
@@ -200,10 +203,10 @@ pytest                  # Testing
 | Phase | Scope | Deliverable |
 |---|---|---|
 | **P1** | Core engine + data layer + 1 strategy | Runnable backtest on daily S&P 500 data |
-| **P2** | Portfolio management + execution + metrics | Full performance report |
+| **P2** | Analytics & metrics | Strategy evaluation, ranking, benchmark comparison |
 | **P3** | Multi-class strategy library (trend, momentum, mean reversion, factor) | Broad strategy universe for comparison |
-| **P4** | Strategy comparison + walk-forward + survivorship bias fix | Rank strategies, select top performers, validate out-of-sample |
-| **P5** | Advanced features (multi-timeframe, live data feed) | Bridge to live trading |
+| **P4** | Signal persistence + portfolio management | Position sizing, risk rules, PnL tracking |
+| **P5** | Execution handler | Simulated fills, slippage/commission models |
 | **P6** | Live deployment + monitoring | Paper trading → live capital, strategy degradation tracking |
 
 ---
