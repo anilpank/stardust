@@ -4,7 +4,7 @@ from unittest.mock import patch
 import pandas as pd
 import pytest
 
-from thermaltrend.update_data import get_existing_tickers, update_ticker
+from thermaltrend.update_data import ensure_spy, get_existing_tickers, update_ticker
 
 
 @pytest.fixture
@@ -216,3 +216,113 @@ class TestUpdateTicker:
             status = update_ticker("AAPL", tmp_path)
 
         assert status == "up_to_date"
+
+
+class TestEnsureSpy:
+    def test_downloads_spy_when_missing(self, tmp_path, sample_ohlcv):
+        with patch("thermaltrend.update_data.yf") as mock_yf:
+            mock_yf.download.return_value = sample_ohlcv
+
+            ensure_spy(tmp_path)
+
+        assert (tmp_path / "SPY.parquet").exists()
+        saved = pd.read_parquet(tmp_path / "SPY.parquet")
+        assert len(saved) == 5
+        assert "Close" in saved.columns
+
+    def test_skips_download_when_spy_exists(self, tmp_path, sample_ohlcv):
+        _write_parquet(tmp_path, "SPY", sample_ohlcv)
+
+        with patch("thermaltrend.update_data.yf") as mock_yf:
+            ensure_spy(tmp_path)
+
+            mock_yf.download.assert_not_called()
+
+    def test_handles_empty_download(self, tmp_path):
+        with patch("thermaltrend.update_data.yf") as mock_yf:
+            mock_yf.download.return_value = pd.DataFrame()
+
+            ensure_spy(tmp_path)
+
+        assert not (tmp_path / "SPY.parquet").exists()
+
+    def test_handles_download_failure(self, tmp_path, capsys):
+        with patch("thermaltrend.update_data.yf") as mock_yf:
+            mock_yf.download.side_effect = Exception("Network error")
+
+            ensure_spy(tmp_path)
+
+        assert not (tmp_path / "SPY.parquet").exists()
+        captured = capsys.readouterr()
+        assert "FAILED" in captured.out
+
+    def test_flattens_multiindex_columns(self, tmp_path):
+        dates = pd.date_range("2024-01-01", periods=3, freq="D")
+        multi = pd.DataFrame(
+            {
+                ("Close", "SPY"): [450.0, 451.0, 452.0],
+                ("Volume", "SPY"): [50_000_000, 51_000_000, 52_000_000],
+            },
+            index=dates,
+        )
+        multi.columns = pd.MultiIndex.from_tuples(
+            [("Close", "SPY"), ("Volume", "SPY")],
+            names=["Price", "Ticker"],
+        )
+
+        with patch("thermaltrend.update_data.yf") as mock_yf:
+            mock_yf.download.return_value = multi
+
+            ensure_spy(tmp_path)
+
+        saved = pd.read_parquet(tmp_path / "SPY.parquet")
+        assert list(saved.columns) == ["Close", "Volume"]
+
+    def test_creates_directory_if_missing(self, tmp_path, sample_ohlcv):
+        nested = tmp_path / "data" / "equities"
+
+        with patch("thermaltrend.update_data.yf") as mock_yf:
+            mock_yf.download.return_value = sample_ohlcv
+
+            ensure_spy(nested)
+
+        assert (nested / "SPY.parquet").exists()
+
+
+class TestMainEnsureSpyCalled:
+    @patch("thermaltrend.update_data.update_ticker")
+    @patch("thermaltrend.update_data.ensure_spy")
+    def test_main_calls_ensure_spy(self, mock_ensure, mock_update, tmp_path):
+        _write_parquet(tmp_path, "AAPL", pd.DataFrame({"Close": [100]}, index=[pd.Timestamp("2024-01-01")]))
+        mock_update.return_value = "up_to_date"
+
+        import thermaltrend.update_data as update_mod
+        original_data_dir = update_mod.DATA_DIR
+        update_mod.DATA_DIR = tmp_path
+        try:
+            with patch("sys.argv", ["update_data.py", "--output", str(tmp_path)]):
+                update_mod.main()
+        finally:
+            update_mod.DATA_DIR = original_data_dir
+
+        mock_ensure.assert_called_once_with(tmp_path)
+
+    @patch("thermaltrend.update_data.update_ticker")
+    @patch("thermaltrend.update_data.ensure_spy")
+    def test_main_updates_spy_after_ensure(self, mock_ensure, mock_update, tmp_path, sample_ohlcv):
+        def fake_ensure(d):
+            _write_parquet(d, "SPY", sample_ohlcv)
+        mock_ensure.side_effect = fake_ensure
+        mock_update.return_value = "updated"
+
+        import thermaltrend.update_data as update_mod
+        original_data_dir = update_mod.DATA_DIR
+        update_mod.DATA_DIR = tmp_path
+        try:
+            with patch("sys.argv", ["update_data.py", "--output", str(tmp_path)]):
+                update_mod.main()
+        finally:
+            update_mod.DATA_DIR = original_data_dir
+
+        tickers_updated = [call[0][0] for call in mock_update.call_args_list]
+        assert "SPY" in tickers_updated

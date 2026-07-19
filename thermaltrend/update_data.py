@@ -4,6 +4,8 @@ Update existing stock data Parquet files with data up to today.
 Reads each .parquet file, determines the last available date, downloads
 incremental data from that point forward, and overwrites the file.
 
+Also ensures SPY (S&P 500 ETF) data is always present and up to date.
+
 Usage:
     python update_data.py                       # Update all tickers
     python update_data.py --tickers AAPL MSFT   # Update specific tickers
@@ -31,6 +33,27 @@ def get_existing_tickers(data_dir: Path, tickers: list[str] | None) -> list[str]
         return existing
 
     return sorted(f.stem for f in data_dir.glob("*.parquet"))
+
+
+def ensure_spy(data_dir: Path) -> None:
+    """Download SPY data if it doesn't already exist."""
+    spy_path = data_dir / "SPY.parquet"
+    if spy_path.exists():
+        return
+
+    print("SPY.parquet not found - downloading initial SPY data...")
+    data_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        data = yf.download("SPY", start="1970-01-01", auto_adjust=True, progress=False)
+        if not data.empty:
+            if isinstance(data.columns, pd.MultiIndex):
+                data.columns = data.columns.droplevel("Ticker")
+            data.to_parquet(spy_path)
+            print(f"  SPY - saved ({len(data)} rows)")
+        else:
+            print("  SPY - no data returned")
+    except Exception as e:
+        print(f"  SPY - FAILED to download: {e}")
 
 
 def update_ticker(ticker: str, data_dir: Path) -> str:
@@ -103,6 +126,9 @@ def main():
     if not data_dir.exists():
         print(f"Data directory not found: {data_dir}")
         return
+
+    # Ensure SPY data exists (download if missing)
+    ensure_spy(data_dir)
 
     tickers = get_existing_tickers(data_dir, args.tickers)
     if not tickers:

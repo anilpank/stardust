@@ -75,3 +75,35 @@ class TestDownloadDataIntegration:
 
         parquet_files = list(tmp_path.glob("*.parquet"))
         assert len(parquet_files) == 2
+
+    def test_download_spy_explicitly(self, tmp_path):
+        result = subprocess.run(
+            [sys.executable, str(DOWNLOAD_SCRIPT), "--tickers", "SPY",
+             "--start", "2024-01-01", "--end", "2024-02-01",
+             "--output", str(tmp_path)],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        assert result.returncode == 0, result.stderr
+
+        spy_file = tmp_path / "SPY.parquet"
+        assert spy_file.exists()
+
+        df = pd.read_parquet(spy_file)
+        assert len(df) > 0
+        assert all(col in df.columns for col in ["Open", "High", "Low", "Close", "Volume"])
+
+    def test_download_spy_alongside_tickers(self, tmp_path):
+        result = subprocess.run(
+            [sys.executable, str(DOWNLOAD_SCRIPT), "--tickers", "AAPL", "SPY",
+             "--start", "2024-01-01", "--end", "2024-02-01",
+             "--output", str(tmp_path)],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        assert result.returncode == 0, result.stderr
+
+        assert (tmp_path / "AAPL.parquet").exists()
+        assert (tmp_path / "SPY.parquet").exists()

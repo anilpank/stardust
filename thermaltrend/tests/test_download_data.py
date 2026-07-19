@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 import pandas as pd
 import pytest
 
-from thermaltrend.download_data import download_and_save, get_sp500_constituents, get_sp500_tickers, get_universe
+from thermaltrend.download_data import download_and_save, get_sp500_constituents, get_sp500_tickers, get_universe, main
 
 
 @pytest.fixture
@@ -216,3 +216,70 @@ class TestDownloadAndSave:
         assert (tmp_path / "AAPL.parquet").exists()
         assert (tmp_path / "MSFT.parquet").exists()
         assert mock_yf.download.call_count == 2
+
+    @patch("thermaltrend.download_data.time.sleep")
+    @patch("thermaltrend.download_data.yf")
+    def test_downloads_spy(self, mock_yf, mock_sleep, tmp_path, sample_ohlcv):
+        mock_yf.download.return_value = sample_ohlcv
+
+        download_and_save(["SPY"], "2024-01-01", "2024-01-06", tmp_path)
+
+        out_file = tmp_path / "SPY.parquet"
+        assert out_file.exists()
+
+        saved = pd.read_parquet(out_file)
+        assert len(saved) == 5
+        assert "Close" in saved.columns
+
+
+class TestMainSpyInclusion:
+    @patch("thermaltrend.download_data.download_and_save")
+    @patch("thermaltrend.download_data.get_sp500_constituents")
+    def test_main_adds_spy_when_fetching_all(self, mock_constituents, mock_download, tmp_path, capsys):
+        mock_constituents.return_value = pd.DataFrame(
+            {"ticker": ["AAPL", "MSFT"], "date_added": ["1982-11-30", "1976-03-31"]}
+        )
+
+        with patch("sys.argv", ["download_data.py", "--output", str(tmp_path)]):
+            main()
+
+        mock_download.assert_called_once()
+        tickers_arg = mock_download.call_args[0][0]
+        assert "SPY" in tickers_arg
+        assert "AAPL" in tickers_arg
+        assert "MSFT" in tickers_arg
+
+    @patch("thermaltrend.download_data.download_and_save")
+    @patch("thermaltrend.download_data.get_sp500_constituents")
+    def test_main_does_not_duplicate_spy_if_in_constituents(self, mock_constituents, mock_download, tmp_path):
+        mock_constituents.return_value = pd.DataFrame(
+            {"ticker": ["AAPL", "SPY"], "date_added": ["1982-11-30", "1993-01-29"]}
+        )
+
+        with patch("sys.argv", ["download_data.py", "--output", str(tmp_path)]):
+            main()
+
+        tickers_arg = mock_download.call_args[0][0]
+        assert tickers_arg.count("SPY") == 1
+
+    @patch("thermaltrend.download_data.download_and_save")
+    def test_main_does_not_add_spy_when_specific_tickers(self, mock_download, tmp_path):
+        with patch("sys.argv", ["download_data.py", "--tickers", "AAPL", "MSFT",
+                                "--output", str(tmp_path)]):
+            main()
+
+        tickers_arg = mock_download.call_args[0][0]
+        assert tickers_arg == ["AAPL", "MSFT"]
+        assert "SPY" not in tickers_arg
+
+    @patch("thermaltrend.download_data.download_and_save")
+    @patch("thermaltrend.download_data.get_sp500_constituents")
+    def test_main_saves_constituents_csv(self, mock_constituents, mock_download, tmp_path):
+        mock_constituents.return_value = pd.DataFrame(
+            {"ticker": ["AAPL"], "date_added": ["1982-11-30"]}
+        )
+
+        with patch("sys.argv", ["download_data.py", "--output", str(tmp_path)]):
+            main()
+
+        assert (tmp_path / "constituents.csv").exists()

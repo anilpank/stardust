@@ -115,6 +115,9 @@ def main():
     else:
         constituents = get_sp500_constituents()
         tickers = constituents["ticker"].tolist()
+        # Include SPY (S&P 500 ETF) alongside constituents
+        if "SPY" not in tickers:
+            tickers.append("SPY")
         # Save constituents manifest for future universe filtering
         output_dir.mkdir(parents=True, exist_ok=True)
         constituents.to_csv(output_dir / "constituents.csv", index=False)

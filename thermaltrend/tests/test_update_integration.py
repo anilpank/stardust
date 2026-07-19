@@ -93,3 +93,34 @@ class TestUpdateIntegration:
 
         second = pd.read_parquet(tmp_path / "AAPL.parquet")
         assert len(second) == len(first)
+
+    def test_update_downloads_spy_when_missing(self, tmp_path):
+        result = subprocess.run(
+            [sys.executable, str(UPDATE_SCRIPT), "--output", str(tmp_path)],
+            capture_output=True, text=True, timeout=60,
+        )
+        assert result.returncode == 0, result.stderr
+
+        spy_file = tmp_path / "SPY.parquet"
+        assert spy_file.exists()
+
+        df = pd.read_parquet(spy_file)
+        assert len(df) > 0
+        assert all(col in df.columns for col in ["Open", "High", "Low", "Close", "Volume"])
+
+    def test_update_keeps_existing_spy(self, tmp_path):
+        _download_ticker(tmp_path, "SPY", "2024-01-01", "2024-02-01")
+
+        before = pd.read_parquet(tmp_path / "SPY.parquet")
+        before_count = len(before)
+
+        result = subprocess.run(
+            [sys.executable, str(UPDATE_SCRIPT), "--tickers", "SPY",
+             "--output", str(tmp_path)],
+            capture_output=True, text=True, timeout=60,
+        )
+        assert result.returncode == 0, result.stderr
+
+        after = pd.read_parquet(tmp_path / "SPY.parquet")
+        assert len(after) >= before_count
+        assert after.index.max() >= before.index.max()
