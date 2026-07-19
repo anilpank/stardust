@@ -2,7 +2,7 @@
 
 ## What This Project Is
 
-An early-stage Python project called **Thermaltrend** — planned to become an event-driven backtesting and live-trading system for trend-following strategies on S&P 500 equities. Currently only the **data acquisition layer** is built.
+An early-stage Python project called **Thermaltrend** — planned to become an event-driven backtesting and live-trading system for trend-following strategies on S&P 500 equities. The **data acquisition layer** and **data feed** are built.
 
 - **Remote:** https://github.com/anilpank/stardust
 - **Python:** 3.13.5 (uses 3.12+ features like `list[str] | None`)
@@ -11,16 +11,16 @@ An early-stage Python project called **Thermaltrend** — planned to become an e
 
 ## Current State
 
-The data pipeline is complete: download, update, and inspect daily OHLCV data for all S&P 500 stocks. Data is stored as individual Parquet files in `thermaltrend/data/equities/`.
+The data pipeline is complete: download, update, and inspect daily OHLCV data for all S&P 500 stocks. Data is stored as individual Parquet files in `thermaltrend/data/equities/`. A `DataFeed` class loads these files and yields bars in strict chronological order for event-driven backtesting.
 
 | Metric | Value |
 |--------|-------|
 | Parquet files | 501 tickers |
 | Data range | 1970 → Jul 19 2026 (varies by ticker) |
 | Columns | Open, High, Low, Close, Volume (auto-adjusted) |
-| Total source code | ~346 lines across 3 modules |
-| Total test code | ~904 lines across 7 test files |
-| Git commits | 19 |
+| Total source code | ~470 lines across 4 modules |
+| Total test code | ~1100 lines across 9 test files |
+| Git commits | 20 |
 
 ## Scripts
 
@@ -29,6 +29,7 @@ The data pipeline is complete: download, update, and inspect daily OHLCV data fo
 | `download_data.py` | Full download from Yahoo Finance (skips existing) | `cd thermaltrend && python download_data.py` |
 | `update_data.py` | Incremental update (downloads only missing days) | `cd thermaltrend && python update_data.py` |
 | `show_start_dates.py` | Inspect data availability per ticker | `cd thermaltrend && python show_start_dates.py` |
+| `feed.py` | Load Parquet files as chronological bars (CLI + library) | `cd thermaltrend && python feed.py` |
 
 All scripts accept `--tickers AAPL MSFT` for specific tickers and `--output PATH` for custom directories.
 
@@ -51,6 +52,7 @@ Pre-commit hook: `.pre-commit-config.yaml` runs `pytest -m "not slow" -q` on eve
 | `thermaltrend/download_data.py` | Full data download with `yfinance` |
 | `thermaltrend/update_data.py` | Incremental update with `gc.collect()` fix for file descriptor leak |
 | `thermaltrend/show_start_dates.py` | Data availability inspector |
+| `thermaltrend/feed.py` | `DataFeed` class + `Bar` dataclass — loads Parquet files, yields bars chronologically for event-driven backtesting |
 | `thermaltrend/ARCHITECTURE.md` | Detailed design doc for the full system (6-layer event-driven architecture) |
 | `thermaltrend/data/equities/constituents.csv` | S&P 500 member list with `date_added` for universe filtering |
 | `pyproject.toml` | Minimal — only defines pytest `slow` marker |
@@ -70,7 +72,7 @@ Pre-commit hook: `.pre-commit-config.yaml` runs `pytest -m "not slow" -q` on eve
 
 The planned system has 6 layers:
 
-1. **Data Layer** ← partially built (current state)
+1. **Data Layer** ← built (download, update, inspect scripts + `DataFeed` for event-driven consumption)
 2. **Event Queue** (MarketEvent, SignalEvent, OrderEvent, FillEvent)
 3. **Strategy Engine** (trend-following: MA crossover, Donchian breakout, ATR trailing stop, etc.)
 4. **Execution Handler** (simulated + live broker bridge)
@@ -88,6 +90,7 @@ pip install pandas numpy yfinance requests pyarrow pytest pre-commit
 ## If Starting a New Session
 
 - Run `git log --oneline -5` to see recent commits
-- Run `pytest thermaltrend/tests/ -m "not slow" -v` to confirm tests pass
-- Run `python thermaltrend/update_data.py --tickers AAPL` to verify the pipeline works
+- Run `pytest thermaltrend/tests/ -m "not slow" -v` to confirm tests pass (61 unit tests)
+- Run `python thermaltrend/update_data.py --tickers AAPL` to verify the data pipeline works
+- Run `python thermaltrend/feed.py` to verify the data feed loads correctly
 - Check `thermaltrend/ARCHITECTURE.md` if planning the next phase of development
