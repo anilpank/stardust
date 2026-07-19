@@ -6,7 +6,26 @@ Trading strategy system
 Python 3.12+ with the following packages:
 
 ```
-pip install pandas numpy yfinance requests pyarrow pytest
+pip install pandas numpy yfinance requests pyarrow pytest pre-commit
+```
+
+## Project Structure
+
+```
+thermaltrend/
+├── data/
+│   └── equities/              # Parquet files for each S&P 500 ticker
+│       ├── constituents.csv   # S&P 500 members with date added
+│       ├── AAPL.parquet
+│       ├── MSFT.parquet
+│       └── ...
+├── download_data.py           # Download OHLCV data from Yahoo Finance
+├── show_start_dates.py        # Show data availability per company
+└── tests/
+    ├── test_download_data.py
+    ├── test_download_integration.py
+    ├── test_show_start_dates.py
+    └── test_show_start_dates_integration.py
 ```
 
 ## Running Scripts
@@ -33,6 +52,26 @@ python download_data.py --output ./my_data
 
 Data is saved to `thermaltrend/data/equities/` by default. Already-downloaded tickers are skipped automatically.
 
+### Show Start Dates
+
+Shows from which date each S&P 500 company has stock data available:
+
+```bash
+cd thermaltrend
+
+# Show all companies (sorted by start date)
+python show_start_dates.py
+
+# Sort by ticker name
+python show_start_dates.py --sort ticker
+
+# Sort by most data (row count)
+python show_start_dates.py --sort rows
+
+# Export results to CSV
+python show_start_dates.py --csv start_dates.csv
+```
+
 ## Running Tests
 
 Install test dependency:
@@ -52,4 +91,14 @@ pytest thermaltrend/tests/ -m "not slow" -v
 ```bash
 pytest thermaltrend/tests/ -v
 ```
+
+## Pre-commit Hooks
+
+Pre-commit hooks run unit tests automatically on every commit. To set up:
+
+```bash
+pre-commit install
+```
+
+After installation, unit tests (excluding slow integration tests) run automatically before each commit. If any test fails, the commit is blocked until the issue is fixed.
 
