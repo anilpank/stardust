@@ -2,7 +2,7 @@
 
 ## What This Project Is
 
-An early-stage Python project called **Thermaltrend** — planned to become an event-driven backtesting and live-trading system for trend-following strategies on S&P 500 equities. The **data acquisition layer**, **data feed**, and **event queue with signal generation** are built.
+An early-stage Python project called **Thermaltrend** — planned to become an event-driven backtesting and live-trading system for **testing, validating, and selecting the best performing strategies** on S&P 500 equities. Not limited to trend-following — encompasses momentum, mean reversion, factor-based, and any strategy class that can be plugged into the `Strategy` ABC. The **data acquisition layer**, **data feed**, and **event queue with signal generation** are built.
 
 - **Remote:** https://github.com/anilpank/stardust
 - **Python:** 3.13.5 (uses 3.12+ features like `list[str] | None`)
@@ -85,10 +85,10 @@ The planned system has 6 layers:
 
 1. **Data Layer** ← built (download, update, inspect scripts + `DataFeed` for event-driven consumption)
 2. **Event Queue** ← built (MarketEvent, SignalEvent, EventQueue + DataEngine + MACrossoverStrategy + signals CLI)
-3. **Strategy Engine** ← partially built (Strategy ABC + MACrossoverStrategy; more strategies needed: Donchian breakout, ATR trailing stop, etc.)
+3. **Strategy Engine** ← partially built (Strategy ABC + MACrossoverStrategy; multi-class strategy library needed: Donchian breakout, ATR trailing stop, momentum, mean reversion, factor scoring)
 4. **Execution Handler** (simulated + live broker bridge)
 5. **Portfolio & Risk** (position sizing, risk management)
-6. **Analytics & Reporting**
+6. **Analytics & Reporting** ← will include strategy comparison, ranking, walk-forward validation
 
 Implemented directory structure: `thermaltrend/` with `core/` (events, strategy, engine), `data/`, `tests/`. Future: `strategy/`, `portfolio/`, `execution/`, `analytics/`, `utils/` subpackages.
 
@@ -105,4 +105,4 @@ pip install pandas numpy yfinance requests pyarrow pytest pre-commit
 - Run `python thermaltrend/update_data.py --tickers AAPL` to verify the data pipeline works
 - Run `python thermaltrend/feed.py` to verify the data feed loads correctly
 - Run `python -m thermaltrend.signals --tickers AAPL MSFT --start 2024-01-01` to verify signal generation works
-- Check `thermaltrend/ARCHITECTURE.md` if planning the next phase of development
+- Check `thermaltrend/ARCHITECTURE.md` if planning the next phase of development (multi-class strategy library, strategy comparison framework)

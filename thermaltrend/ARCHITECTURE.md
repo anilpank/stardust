@@ -152,16 +152,32 @@ The queue ensures **strictly sequential processing** — no future data leaks.
 
 ---
 
-## 6. Trend Following Strategies to Support
+## 6. Strategy Universe (Multi-Class)
 
-Given the S&P 500 focus, these are natural starting strategies:
+The system is strategy-agnostic. Strategies across multiple classes can be plugged into the same engine:
 
+### Trend Following
 1. **Moving Average Crossover** (SMA/EMA golden cross)
 2. **Donchian Channel Breakout** (new highs -> entry, channel low -> exit)
 3. **ATR Trailing Stop** (trend entry + volatility-based trailing stop)
-4. **Dual Momentum** (absolute + relative momentum across sector ETFs)
-5. **Sector Rotation** (momentum-based ranking across SPDR sectors)
-6. **Adaptive Moving Average** (Kaufman's KAMA or similar)
+4. **Adaptive Moving Average** (Kaufman's KAMA)
+
+### Momentum
+5. **Dual Momentum** (absolute + relative momentum across sector ETFs)
+6. **Sector Rotation** (momentum-based ranking across SPDR sectors)
+7. **RSI Momentum** (RSI-based trend continuation entries)
+
+### Mean Reversion
+8. **RSI Mean Reversion** (oversold/overbought reversals)
+9. **Bollinger Band Bounce** (revert to mean after band touch)
+
+### Factor-Based
+10. **Simple Factor Scoring** (value, quality, low-vol composite rank)
+
+### Baseline
+- **S&P 500 Buy-and-Hold** — benchmark to beat
+
+All strategies share the same `Strategy` ABC. The comparison framework (Phase 4) will rank them by risk-adjusted return, robustness, and consistency.
 
 ---
 
@@ -185,9 +201,10 @@ pytest                  # Testing
 |---|---|---|
 | **P1** | Core engine + data layer + 1 strategy | Runnable backtest on daily S&P 500 data |
 | **P2** | Portfolio management + execution + metrics | Full performance report |
-| **P3** | Multiple strategies + parameter optimization | Strategy comparison framework |
-| **P4** | Walk-forward analysis + survivorship bias fix | Production validation tools |
+| **P3** | Multi-class strategy library (trend, momentum, mean reversion, factor) | Broad strategy universe for comparison |
+| **P4** | Strategy comparison + walk-forward + survivorship bias fix | Rank strategies, select top performers, validate out-of-sample |
 | **P5** | Advanced features (multi-timeframe, live data feed) | Bridge to live trading |
+| **P6** | Live deployment + monitoring | Paper trading → live capital, strategy degradation tracking |
 
 ---
 

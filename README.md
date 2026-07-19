@@ -1,6 +1,6 @@
 # stardust
 
-Event-driven backtesting system for trend-following strategies on S&P 500 equities.
+Event-driven backtesting system for trading strategies on S&P 500 equities. Test, validate, and select the best performing strategies across multiple classes (trend, momentum, mean reversion, factor-based).
 
 ## Prerequisites
 
@@ -191,10 +191,10 @@ Event-driven design with 6 layers:
 
 1. **Data Layer** — download, update, inspect Parquet files + DataFeed
 2. **Event Queue** — MarketEvent → SignalEvent flow with strict chronological ordering
-3. **Strategy Engine** — Strategy ABC + MACrossoverStrategy (more strategies planned)
+3. **Strategy Engine** — Strategy ABC + MACrossoverStrategy (trend, momentum, mean reversion, factor strategies planned)
 4. **Execution Handler** — simulated fills + live broker bridge (planned)
 5. **Portfolio & Risk** — position sizing, risk management (planned)
-6. **Analytics & Reporting** — Sharpe, drawdown, tearsheet (planned)
+6. **Analytics & Reporting** — Sharpe, drawdown, tearsheet, strategy ranking & selection (planned)
 
 ## Running Tests
 

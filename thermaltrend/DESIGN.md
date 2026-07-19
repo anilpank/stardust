@@ -10,14 +10,19 @@
 
 ### Why Build This?
 
-The goal is a personal trading system for trend-following strategies on S&P 500 equities. The workflow is:
+The goal is a personal trading system to **test, validate, and select the best performing strategies** on S&P 500 equities — not limited to trend-following, but encompassing any strategy class (momentum, mean reversion, factor-based, statistical arbitrage, etc.). The workflow is:
 
-1. **Backtest** — validate strategies on historical data
-2. **Signal generation** — run strategy daily, see ranked signals
-3. **Manual execution** — act on strongest signals via SAXO/Revolut
-4. **Future: automate** — eventually connect to broker APIs
+1. **Backtest** — run multiple strategy types on historical data, measure performance
+2. **Compare & validate** — rank strategies by risk-adjusted returns, robustness, and consistency
+3. **Signal generation** — run validated strategies daily, see ranked signals
+4. **Manual execution** — act on strongest signals via SAXO/Revolut
+5. **Future: automate** — eventually connect to broker APIs
 
 The key requirement is **trustworthiness**. A backtest that says "you'd have made 40% annually" is worthless if it contains subtle lookahead bias. The system must process data exactly the way a live system would — bar by bar, no future information leaking into past decisions.
+
+### Strategy-Agnostic Design
+
+The system is deliberately designed to be strategy-agnostic. The `Strategy` ABC accepts a `MarketEvent` and returns a `SignalEvent` — any strategy that fits this interface can be plugged in. The goal is to run a broad universe of strategies, identify the ones that perform best on S&P 500 equities, and trade only those that survive rigorous out-of-sample validation.
 
 ---
 
@@ -34,10 +39,10 @@ Six layers planned, two built:
 |-------|--------|------|
 | Data Layer | Built | Download, update, inspect Parquet files; `DataFeed` yields chronological bars |
 | Event Queue | Built | `MarketEvent` → `SignalEvent` flow via `EventQueue`; `DataEngine` orchestrates |
-| Strategy Engine | Partial | `Strategy` ABC + `MACrossoverStrategy`; needs more strategies |
+| Strategy Engine | Partial | `Strategy` ABC + `MACrossoverStrategy`; needs multi-class strategy library |
 | Execution Handler | Planned | Simulated fills, slippage models, live broker bridge |
 | Portfolio & Risk | Planned | Position sizing, risk rules, PnL tracking |
-| Analytics | Planned | Sharpe, max drawdown, tearsheet, benchmark comparison |
+| Analytics | Planned | Sharpe, max drawdown, tearsheet, benchmark comparison, **strategy ranking & selection** |
 
 ---
 
@@ -106,22 +111,24 @@ Six layers planned, two built:
 
 **Trade-off:** Bare imports (`from feed import Bar`) are slightly more convenient for quick scripts. We updated all existing tests to use full package imports for consistency.
 
-### 3.5 MACrossover as First Strategy
+### 3.5 MACrossover as First Strategy (Baseline)
 
-**Decision:** 50/200 Simple Moving Average crossover as the initial strategy.
+**Decision:** 50/200 Simple Moving Average crossover as the initial strategy — not because it's the best, but because it's the simplest to validate.
 
 **Alternatives considered:**
 - **Donchian Channel Breakout** — buy on new 20-day highs, sell on channel low
 - **ATR Trailing Stop** — trend entry with volatility-based exit
-- **RSI-based** — mean reversion (not trend-following)
+- **RSI-based** — mean reversion
+- **Momentum ranking** — relative strength across universe
+- **Factor models** — value, quality, low-vol
 
-**Why MACrossover:**
-- Simplest possible trend-following signal — golden cross / death cross.
-- Easy to verify correctness: compute MA manually, check if crossover occurs.
+**Why MACrossover first:**
+- Simplest possible signal — golden cross / death cross. Easy to verify correctness by hand.
 - Well-understood: decades of academic and practitioner evidence.
 - Produces both BUY and SELL signals, exercising both code paths.
+- Serves as a **baseline** — all future strategies (across any class) will be compared against it.
 
-**Trade-off:** MA crossover is slow — it lags the trend by the lookback period. It whipsaws in sideways markets. But it's a baseline — all future strategies will be compared against it.
+**Trade-off:** MA crossover is slow — it lags the trend by the lookback period. It whipsaws in sideways markets. But that's exactly why it's a useful baseline: a strategy must beat a simple MA crossover to justify its complexity.
 
 ### 3.6 Signals CLI for Manual Trading
 
@@ -238,11 +245,12 @@ Six layers planned, two built:
 
 | Limitation | Impact | Mitigation |
 |------------|--------|------------|
-| Daily bars only | Can't detect intraday patterns | Sufficient for trend-following; intraday support planned for P5 |
+| Daily bars only | Can't detect intraday patterns | Sufficient for initial validation; intraday support planned for P6 |
 | No signal persistence | Signals from previous days are lost | Next step: save signals to Parquet |
-| Single strategy | Can't combine signals from multiple strategies | StrategyABC supports this; need portfolio-level signal aggregation |
-| No benchmark comparison | Can't tell if strategy beats S&P 500 | Planned in Analytics layer |
+| Single strategy | Can't combine signals or compare strategies | Strategy library expansion planned in P3; strategy comparison in P4 |
+| No benchmark comparison | Can't tell if strategy beats S&P 500 | Planned in Analytics layer (P4) |
 | No position sizing | Signals don't include "how much to buy" | Planned in Portfolio layer |
+| No walk-forward validation | Overfitting risk not addressed | Planned in P4 — rolling out-of-sample windows |
 | `gc.collect()` workaround | File descriptor leak is a symptom, not root cause | Acceptable for now; could switch to session-based yfinance usage |
 
 ---
@@ -254,20 +262,31 @@ Six layers planned, two built:
 - Track which signals were acted on (manual annotation)
 - Record manual trades for PnL calculation
 
-### Phase 3: More Strategies
-- Donchian Channel Breakout (new highs → entry)
-- ATR Trailing Stop (trend entry + volatility-based exit)
-- Dual Momentum (absolute + relative momentum)
+### Phase 3: Strategy Expansion (Multi-Class)
+Implement strategies across multiple classes to cast a wide net:
+- **Trend Following:** Donchian Channel Breakout, ATR Trailing Stop, Adaptive MA (KAMA)
+- **Momentum:** Dual Momentum (absolute + relative), Sector Rotation, RSI momentum
+- **Mean Reversion:** RSI-based entries, Bollinger Band bounce
+- **Factor-Based:** Simple value/quality/momentum factor scoring
+- All strategies share the same `Strategy` ABC interface — plug and play.
 
-### Phase 4: Backtesting Framework
-- Compute Sharpe, Sortino, max drawdown, CAGR
-- Compare strategy vs S&P 500 buy-and-hold
+### Phase 4: Backtesting Framework + Strategy Comparison
+- Compute Sharpe, Sortino, max drawdown, CAGR, Calmar, win rate, profit factor
+- Compare each strategy vs S&P 500 buy-and-hold and vs each other
 - Walk-forward analysis (rolling out-of-sample validation)
+- **Strategy selection:** rank strategies by risk-adjusted return, robustness, and consistency across market regimes
+- Identify the top N strategies to trade; discard the rest
 
 ### Phase 5: Automated Execution
 - Add `OrderEvent` and `FillEvent` to the event system
 - Simulated execution handler with slippage and commission models
 - Live broker bridge (SAXO/Revolut API)
+
+### Phase 6: Live Deployment
+- Run validated strategies on a paper trading account
+- Gradually transition to live trading with real capital
+- Monitor for strategy degradation (performance decay over time)
+- Periodic re-validation: re-run backtests on fresh data, retire strategies that no longer work
 
 ---
 
@@ -282,3 +301,5 @@ Six layers planned, two built:
 4. **Build for manual first, automate later.** The signal CLI is the interface today. When automation is needed, the same engine produces the same signals — we just add an execution handler instead of printing them.
 
 5. **Trust requires evidence.** Event-driven architecture isn't the simplest approach, but it's the only one that gives confidence that backtest results would replicate in live trading.
+
+6. **Strategy-agnostic beats strategy-specific.** By keeping the `Strategy` ABC generic, we can test any strategy class — trend, momentum, mean reversion, factor-based — without changing the engine. The best strategies will emerge from rigorous comparison, not from choosing a single approach upfront.
