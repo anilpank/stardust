@@ -2,7 +2,7 @@
 
 ## What This Project Is
 
-An early-stage Python project called **Thermaltrend** — planned to become an event-driven backtesting and live-trading system for trend-following strategies on S&P 500 equities. The **data acquisition layer** and **data feed** are built.
+An early-stage Python project called **Thermaltrend** — planned to become an event-driven backtesting and live-trading system for trend-following strategies on S&P 500 equities. The **data acquisition layer**, **data feed**, and **event queue with signal generation** are built.
 
 - **Remote:** https://github.com/anilpank/stardust
 - **Python:** 3.13.5 (uses 3.12+ features like `list[str] | None`)
@@ -11,7 +11,7 @@ An early-stage Python project called **Thermaltrend** — planned to become an e
 
 ## Current State
 
-The data pipeline is complete: download, update, and inspect daily OHLCV data for all S&P 500 stocks. Data is stored as individual Parquet files in `thermaltrend/data/equities/`. A `DataFeed` class loads these files and yields bars in strict chronological order for event-driven backtesting.
+The data pipeline and event-driven engine are built. Data is stored as individual Parquet files in `thermaltrend/data/equities/`. A `DataFeed` class loads these files and yields bars in strict chronological order. The `EventQueue` processes MarketEvents through a Strategy to produce SignalEvents, which can be viewed via the `signals.py` CLI tool.
 
 | Metric | Value |
 |--------|-------|
@@ -20,7 +20,7 @@ The data pipeline is complete: download, update, and inspect daily OHLCV data fo
 | Columns | Open, High, Low, Close, Volume (auto-adjusted) |
 | Total source code | ~750 lines across 8 modules |
 | Total test code | ~1500 lines across 13 test files |
-| Git commits | 20 |
+| Git commits | 23 |
 
 ## Scripts
 
@@ -90,7 +90,7 @@ The planned system has 6 layers:
 5. **Portfolio & Risk** (position sizing, risk management)
 6. **Analytics & Reporting**
 
-Proposed directory structure: `src/thermaltrend/` with `core/`, `data/`, `strategy/`, `portfolio/`, `execution/`, `analytics/`, `utils/` — **not yet implemented**, code currently lives flat under `thermaltrend/`.
+Implemented directory structure: `thermaltrend/` with `core/` (events, strategy, engine), `data/`, `tests/`. Future: `strategy/`, `portfolio/`, `execution/`, `analytics/`, `utils/` subpackages.
 
 ## Dependencies
 
