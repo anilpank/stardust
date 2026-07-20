@@ -16,7 +16,7 @@ pip install pandas numpy yfinance requests pyarrow pytest pre-commit
 thermaltrend/
 ├── core/                          # Event engine
 │   ├── events.py                  # MarketEvent, SignalEvent, EventQueue
-│   ├── strategy.py                # Strategy ABC + MACrossover, Donchian, RSI strategies
+│   ├── strategy.py                # Strategy ABC + MACrossover, Donchian, RSI, ATR Trailing Stop
 │   └── engine.py                  # DataEngine (main event loop)
 ├── analytics/                     # Strategy evaluation & comparison
 │   ├── trade_simulator.py         # SignalEvents → simulated trades (ATR stops, $10K sizing)
@@ -38,7 +38,7 @@ thermaltrend/
 ├── signals.py                     # Generate trading signals from strategy
 └── tests/
     ├── test_events.py             # EventQueue + event type tests
-    ├── test_strategy.py           # Strategy tests (MA, Donchian, RSI)
+    ├── test_strategy.py           # Strategy tests (MA, Donchian, RSI, ATR Trailing Stop)
     ├── test_engine.py             # DataEngine integration tests
     ├── test_signals.py            # Signal output tests
     ├── test_trade_simulator.py    # Trade simulation tests
@@ -180,6 +180,9 @@ python -m thermaltrend.signals --strategy donchian --tickers AAPL MSFT
 # Use RSI mean reversion strategy
 python -m thermaltrend.signals --strategy rsi_mean_reversion --tickers AAPL MSFT
 
+# Use ATR trailing stop strategy (Chandelier Exit)
+python -m thermaltrend.signals --strategy atr_trailing_stop --tickers AAPL MSFT
+
 # Filter by minimum strength and direction
 python -m thermaltrend.signals --min-strength 0.5 --direction BUY
 
@@ -187,13 +190,13 @@ python -m thermaltrend.signals --min-strength 0.5 --direction BUY
 python -m thermaltrend.signals --start 2024-01-01 --end 2024-12-31
 ```
 
-Available strategies: `ma_crossover`, `donchian`, `rsi_mean_reversion`
+Available strategies: `ma_crossover`, `donchian`, `rsi_mean_reversion`, `atr_trailing_stop`
 
 Library usage:
 
 ```python
 from thermaltrend.core.engine import DataEngine
-from thermaltrend.core.strategy import MACrossoverStrategy, DonchianBreakoutStrategy, RSIMeanReversionStrategy
+from thermaltrend.core.strategy import MACrossoverStrategy, DonchianBreakoutStrategy, RSIMeanReversionStrategy, ATRTrailingStopStrategy
 from thermaltrend.feed import DataFeed
 
 feed = DataFeed("thermaltrend/data/equities", tickers=["AAPL", "MSFT"])
@@ -216,6 +219,7 @@ from thermaltrend.core.strategy import MACrossoverStrategy, DonchianBreakoutStra
 from thermaltrend.analytics.compare import run_strategy_analysis, compare_strategies
 from thermaltrend.analytics.metrics import compute_benchmark_metrics
 from thermaltrend.analytics.report import format_ranking_table
+from thermaltrend.core.strategy import MACrossoverStrategy, DonchianBreakoutStrategy, RSIMeanReversionStrategy, ATRTrailingStopStrategy
 import pandas as pd
 
 feed = DataFeed("thermaltrend/data/equities", tickers=["AAPL", "MSFT", "GOOGL"])
@@ -224,6 +228,7 @@ strategies = {
     "MA 50/200": MACrossoverStrategy(50, 200),
     "Donchian 20/10": DonchianBreakoutStrategy(20, 10),
     "RSI 14": RSIMeanReversionStrategy(14, 30.0, 70.0),
+    "ATR Trailing Stop": ATRTrailingStopStrategy(20, 14, 3.0),
 }
 
 results = {}
@@ -255,7 +260,7 @@ Event-driven design with 6 layers:
 
 1. **Data Layer** — download, update, inspect Parquet files + DataFeed
 2. **Event Queue** — MarketEvent → SignalEvent flow with strict chronological ordering
-3. **Strategy Engine** — Strategy ABC + 3 strategies: MA Crossover, Donchian Breakout, RSI Mean Reversion
+3. **Strategy Engine** — Strategy ABC + 4 strategies: MA Crossover, Donchian Breakout, RSI Mean Reversion, ATR Trailing Stop
 4. **Analytics & Reporting** — Trade simulation, metrics, regime analysis, strategy ranking (built)
 5. **Execution Handler** — simulated fills + live broker bridge (planned)
 6. **Portfolio & Risk** — position sizing, risk management (planned)
