@@ -2,7 +2,7 @@
 
 **Author:** Anil
 **Date:** July 2026
-**Status:** Phase 1-3 Partially Complete (Data Layer + Event Queue + Signal Generation + Analytics + 3 Phase 3 strategies)
+**Status:** Phase 2-3 Complete (Data Layer + Event Queue + Signal Generation + Analytics + Signal Persistence + Backtest/Compare CLI + 4 strategies)
 
 ---
 
@@ -345,7 +345,6 @@ Six layers, four built:
 | Limitation | Impact | Mitigation |
 |------------|--------|------------|
 | Daily bars only | Can't detect intraday patterns | Sufficient for initial validation; intraday support planned for P6 |
-| No signal persistence | Signals from previous days are lost | Next step: save signals to Parquet |
 | Single strategy | Can't combine signals or compare strategies | Strategy library expansion in P3 (4 of 6 built) |
 | No position sizing beyond fixed $10K | Real portfolio allocation not modeled | Planned in Portfolio layer |
 | No walk-forward validation | Overfitting risk not addressed | Deferred — rolling out-of-sample windows |
@@ -356,7 +355,7 @@ Six layers, four built:
 
 ## 6. What's Next
 
-### Phase 3: Strategy Expansion (Multi-Class) — Partially Complete
+### Phase 3: Strategy Expansion (Multi-Class) — 4 of 6 Complete
 Implement strategies across multiple classes to cast a wide net:
 - **Trend Following:** Donchian Channel Breakout ✅, ATR Trailing Stop ✅, Adaptive MA (KAMA)
 - **Momentum:** Dual Momentum (absolute + relative), Sector Rotation, RSI momentum
@@ -364,10 +363,11 @@ Implement strategies across multiple classes to cast a wide net:
 - **Factor-Based:** Simple value/quality/momentum factor scoring
 - All strategies share the same `Strategy` ABC interface — plug and play.
 
-### Phase 2 (cont.): Signal Logging
-- Save signals to Parquet with timestamp, direction, strength, metadata
-- Track which signals were acted on (manual annotation)
-- Record manual trades for PnL calculation
+### Phase 2 (cont.): Signal Logging ← Built
+- `signal_store.py` — save signals to Parquet, query history, annotate actions
+- `backtest.py` — single-strategy backtest CLI with full metrics
+- `compare_cli.py` — multi-strategy comparison CLI with ranking table
+- `signals.py --save` — persist signals directly from the signal generation tool
 
 ### Phase 4: Portfolio & Execution
 - Add `OrderEvent` and `FillEvent` to the event system

@@ -5,6 +5,7 @@ Usage:
     python thermaltrend/signals.py
     python thermaltrend/signals.py --strategy ma_crossover --min-strength 0.5
     python thermaltrend/signals.py --tickers AAPL MSFT --start 2025-01-01
+    python thermaltrend/signals.py --strategy ma_crossover --tickers AAPL --save
 """
 
 from pathlib import Path
@@ -17,6 +18,7 @@ from thermaltrend.core.strategy import (
     RSIMeanReversionStrategy,
 )
 from thermaltrend.feed import DataFeed
+from thermaltrend.signal_store import SignalStore
 
 DEFAULT_DATA_DIR = str(Path(__file__).parent / "data" / "equities")
 
@@ -63,6 +65,7 @@ def main():
     parser.add_argument("--end", default=None, help="End date (YYYY-MM-DD)")
     parser.add_argument("--min-strength", type=float, default=0.0, help="Minimum signal strength (0.0-1.0)")
     parser.add_argument("--direction", default=None, choices=["BUY", "SELL", "HOLD"], help="Filter by direction")
+    parser.add_argument("--save", action="store_true", help="Save signals to signal store")
     parser.add_argument(
         "--data-dir", default=DEFAULT_DATA_DIR,
         help="Directory containing Parquet files",
@@ -89,6 +92,18 @@ def main():
     print(f"Strategy: {args.strategy}")
     print()
     print(format_signals_table(filtered, args.strategy))
+
+    if args.save:
+        store = SignalStore()
+        run_id = store.save(
+            signals=filtered,
+            strategy_name=args.strategy,
+            tickers=args.tickers or feed.tickers,
+            start_date=args.start,
+            end_date=args.end,
+        )
+        print(f"\nSignals saved. Run ID: {run_id}")
+        print(f"Use 'python thermaltrend/signal_store.py show {run_id}' to view.")
 
 
 if __name__ == "__main__":

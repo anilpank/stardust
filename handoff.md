@@ -19,8 +19,8 @@ The data pipeline, event-driven engine, and analytics module are built. Data is 
 | Data range | 1970 → Jul 19 2026 (varies by ticker) |
 | Columns | Open, High, Low, Close, Volume (auto-adjusted) |
 | Strategies | 4 (MA Crossover, Donchian Breakout, RSI Mean Reversion, ATR Trailing Stop) |
-| Total source code | ~2,320 lines across 14 modules |
-| Total test code | ~3,100 lines across 18 test files (194 unit tests) |
+| Total source code | ~2,800 lines across 17 modules |
+| Total test code | ~3,400 lines across 21 test files (223 unit tests) |
 | Git commits | 27 |
 
 ## Scripts
@@ -31,7 +31,10 @@ The data pipeline, event-driven engine, and analytics module are built. Data is 
 | `update_data.py` | Incremental update (downloads only missing days) | `cd thermaltrend && python update_data.py` |
 | `show_start_dates.py` | Inspect data availability per ticker | `cd thermaltrend && python show_start_dates.py` |
 | `feed.py` | Load Parquet files as chronological bars (CLI + library) | `cd thermaltrend && python feed.py` |
-| `signals.py` | Generate trading signals from strategy (CLI + library) | `cd thermaltrend && python -m thermaltrend.signals --strategy ma_crossover\|donchian\|rsi_mean_reversion\|atr_trailing_stop` |
+| `signals.py` | Generate trading signals from strategy (with --save) | `cd thermaltrend && python -m thermaltrend.signals --strategy ma_crossover\|donchian\|rsi_mean_reversion\|atr_trailing_stop` |
+| `backtest.py` | Backtest a single strategy with full metrics | `cd thermaltrend && python thermaltrend/backtest.py --strategy ma_crossover --ticker AAPL --start 2023-01-01` |
+| `compare_cli.py` | Compare multiple strategies side-by-side | `cd thermaltrend && python thermaltrend/compare_cli.py --tickers AAPL MSFT --start 2023-01-01` |
+| `signal_store.py` | Persist, query, and annotate signals | `cd thermaltrend && python thermaltrend/signal_store.py list` |
 
 All scripts accept `--tickers AAPL MSFT` for specific tickers and `--output PATH` for custom directories.
 
@@ -78,6 +81,26 @@ for name, result in results.items():
     print(format_regime_table(regime_m, name))
 ```
 
+### CLI Quick Reference
+
+```bash
+# Backtest a single strategy
+python thermaltrend/backtest.py --strategy ma_crossover --ticker AAPL --start 2023-01-01
+python thermaltrend/backtest.py --strategy donchian --tickers AAPL MSFT --per-ticker --regime
+python thermaltrend/backtest.py --strategy rsi_mean_reversion --ticker AAPL --params '{"period": 20}' --output result.json
+
+# Compare strategies
+python thermaltrend/compare_cli.py --tickers AAPL MSFT GOOGL --start 2023-01-01
+python thermaltrend/compare_cli.py --strategies ma_crossover donchian --ticker AAPL --sort-by sharpe
+
+# Signal persistence
+python thermaltrend/signals.py --strategy ma_crossover --tickers AAPL --save
+python thermaltrend/signal_store.py list
+python thermaltrend/signal_store.py show <run_id>
+python thermaltrend/signal_store.py annotate <signal_id> --action acted --notes "Bought at $195"
+python thermaltrend/signal_store.py pending
+```
+
 ## Testing
 
 ```bash
@@ -103,6 +126,9 @@ Test files:
 - `tests/test_regime.py` — Regime detection and breakdown (7 tests)
 - `tests/test_compare.py` — Strategy ranking and comparison (6 tests)
 - `tests/test_report.py` — Terminal, JSON, CSV output (15 tests)
+- `tests/test_backtest.py` — Backtest CLI + library (8 tests)
+- `tests/test_compare_cli.py` — Compare CLI + library (6 tests)
+- `tests/test_signal_store.py` — Signal persistence and annotation (15 tests)
 
 Pre-commit hook: `.pre-commit-config.yaml` runs `pytest -m "not slow" -q` on every `git commit`.
 
@@ -114,12 +140,15 @@ Pre-commit hook: `.pre-commit-config.yaml` runs `pytest -m "not slow" -q` on eve
 | `thermaltrend/update_data.py` | Incremental update with `gc.collect()` fix for file descriptor leak |
 | `thermaltrend/show_start_dates.py` | Data availability inspector |
 | `thermaltrend/feed.py` | `DataFeed` class + `Bar` dataclass — loads Parquet files, yields bars chronologically |
-| `thermaltrend/signals.py` | Signal output CLI — runs strategy on data feed, outputs ranked trading signals |
+| `thermaltrend/backtest.py` | `run_backtest()` library function + CLI — single-strategy backtest with metrics |
+| `thermaltrend/compare_cli.py` | `run_compare()` library function + CLI — multi-strategy ranking with benchmark |
+| `thermaltrend/signal_store.py` | `SignalStore` class + CLI — persist, query, and annotate signals |
+| `thermaltrend/signals.py` | Signal output CLI — runs strategy on data feed, outputs ranked trading signals (--save to persist) |
 | `thermaltrend/core/events.py` | Event types (`MarketEvent`, `SignalEvent`) and `EventQueue` (deque-based FIFO) |
 | `thermaltrend/core/strategy.py` | Strategy ABC + `MACrossoverStrategy`, `DonchianBreakoutStrategy`, `RSIMeanReversionStrategy`, `ATRTrailingStopStrategy` |
 | `thermaltrend/core/engine.py` | `DataEngine` — main event loop connecting DataFeed → Strategy → Signals |
 | `thermaltrend/analytics/trade_simulator.py` | Converts SignalEvents into simulated Trades with ATR stops, $10K sizing |
-| `thermaltrend/analytics/metrics.py` | CAGR, Sharpe, Sortino, MaxDD, Calmar, win rate, profit factor, confidence score |
+| `thermaltrend/analytics/metrics.py` | CAGR, Sharpe, Sortino, MaxDD, Calmar, win rate, confidence score |
 | `thermaltrend/analytics/regime.py` | Market regime detection (BULL/BEAR/SIDEWAYS) + per-regime metrics |
 | `thermaltrend/analytics/compare.py` | Multi-strategy ranking with SPY buy-and-hold baseline |
 | `thermaltrend/analytics/report.py` | Terminal table + JSON + CSV export |
@@ -149,8 +178,9 @@ The planned system has 6 layers:
 2. **Event Queue** ← built (MarketEvent, SignalEvent, EventQueue + DataEngine + MACrossoverStrategy + signals CLI)
 3. **Strategy Engine** ← 4 of ~6 strategies built (MACrossoverStrategy, DonchianBreakoutStrategy, RSIMeanReversionStrategy, ATRTrailingStopStrategy); dual momentum, factor scoring still planned
 4. **Analytics & Reporting** ← built (trade simulation, metrics, regime analysis, strategy ranking, benchmark comparison)
-5. **Execution Handler** (simulated + live broker bridge)
+5. **Signal Persistence** ← built (signal_store.py, backtest.py, compare_cli.py)
 6. **Portfolio & Risk** (position sizing, risk management)
+7. **Execution Handler** (simulated + live broker bridge)
 
 Implemented directory structure: `thermaltrend/` with `core/` (events, strategy, engine), `analytics/` (trade_simulator, metrics, regime, compare, report), `data/`, `tests/`. Future: `portfolio/`, `execution/`, `utils/` subpackages.
 
@@ -163,24 +193,30 @@ pip install pandas numpy yfinance requests pyarrow pytest pre-commit
 ## If Starting a New Session
 
 - Run `git log --oneline -5` to see recent commits
-- Run `pytest thermaltrend/tests/ -m "not slow" -v` to confirm tests pass (194 unit tests)
+- Run `pytest thermaltrend/tests/ -m "not slow" -v` to confirm tests pass (223 unit tests)
 - Run `python thermaltrend/update_data.py --tickers AAPL` to verify the data pipeline works
 - Run `python thermaltrend/feed.py` to verify the data feed loads correctly
 - Run `python -m thermaltrend.signals --tickers AAPL MSFT --start 2024-01-01` to verify signal generation works
-- Try the analytics:
+- Try the backtest:
+
+```bash
+python thermaltrend/backtest.py --strategy ma_crossover --ticker AAPL --start 2024-01-01
+python thermaltrend/compare_cli.py --tickers AAPL MSFT --start 2024-01-01
+```
+
+- Try signal persistence:
+
+```bash
+python thermaltrend/signals.py --strategy ma_crossover --tickers AAPL --save
+python thermaltrend/signal_store.py list
+```
+
+- Try the analytics library:
 
 ```python
-from thermaltrend.feed import DataFeed
-from thermaltrend.core.engine import DataEngine
-from thermaltrend.core.strategy import MACrossoverStrategy
-from thermaltrend.analytics.compare import run_strategy_analysis
-
-feed = DataFeed("thermaltrend/data/equities", tickers=["AAPL", "MSFT"], start_date="2024-01-01")
-strategy = MACrossoverStrategy(fast_period=20, slow_period=50)
-engine = DataEngine(feed, strategy)
-signals = engine.run()
-result = run_strategy_analysis(signals, feed._data, "MA 20/50")
+from thermaltrend.backtest import run_backtest
+result = run_backtest("ma_crossover", ["AAPL", "MSFT"], start_date="2024-01-01")
 print(result["metrics"])
 ```
 
-- Check `thermaltrend/DESIGN.md` if planning the next phase of development (dual momentum, factor scoring strategies, signal persistence)
+- Check `thermaltrend/DESIGN.md` if planning the next phase of development (dual momentum, factor scoring strategies, portfolio layer)

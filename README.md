@@ -25,35 +25,21 @@ thermaltrend/
 │   ├── compare.py                 # Multi-strategy ranking table with benchmark
 │   └── report.py                  # Terminal table + JSON + CSV export
 ├── data/
-│   └── equities/                  # Parquet files for each S&P 500 ticker + SPY
-│       ├── constituents.csv       # S&P 500 members with date added
-│       ├── AAPL.parquet
-│       ├── MSFT.parquet
-│       ├── SPY.parquet            # S&P 500 ETF (benchmark)
-│       └── ...
+│   ├── equities/                  # Parquet files for each S&P 500 ticker + SPY
+│   │   ├── constituents.csv       # S&P 500 members with date added
+│   │   ├── AAPL.parquet
+│   │   └── ...
+│   ├── signals/                   # Saved signal runs (one Parquet per run)
+│   └── actions/                   # Action annotations (acted/skipped/pending)
 ├── download_data.py               # Download OHLCV data from Yahoo Finance
 ├── update_data.py                 # Incrementally update existing Parquet files
 ├── show_start_dates.py            # Show data availability per company
 ├── feed.py                        # Data feed: load Parquet files as chronological bars
-├── signals.py                     # Generate trading signals from strategy
-└── tests/
-    ├── test_events.py             # EventQueue + event type tests
-    ├── test_strategy.py           # Strategy tests (MA, Donchian, RSI, ATR Trailing Stop)
-    ├── test_engine.py             # DataEngine integration tests
-    ├── test_signals.py            # Signal output tests
-    ├── test_trade_simulator.py    # Trade simulation tests
-    ├── test_metrics.py            # Metric calculation tests
-    ├── test_regime.py             # Regime detection tests
-    ├── test_compare.py            # Strategy comparison tests
-    ├── test_report.py             # Report formatting tests
-    ├── test_feed.py
-    ├── test_feed_integration.py
-    ├── test_download_data.py
-    ├── test_download_integration.py
-    ├── test_update_data.py
-    ├── test_update_integration.py
-    ├── test_show_start_dates.py
-    └── test_show_start_dates_integration.py
+├── backtest.py                    # Backtest a single strategy (CLI + library)
+├── compare_cli.py                 # Compare multiple strategies (CLI + library)
+├── signal_store.py                # Persist, query, and annotate signals
+├── signals.py                     # Generate trading signals (with --save)
+└── tests/                         # 223 unit tests (19 test files)
 ```
 
 ## Running Scripts
@@ -208,6 +194,87 @@ for s in signals:
     print(f"{s.timestamp.date()} {s.ticker} {s.direction.value} {s.strength:.4f}")
 ```
 
+Save signals to the store for later review:
+
+```bash
+python thermaltrend/signals.py --strategy ma_crossover --tickers AAPL MSFT --save
+```
+
+### Backtest
+
+Run a single strategy and get full performance metrics:
+
+```bash
+# Basic backtest
+python thermaltrend/backtest.py --strategy ma_crossover --ticker AAPL --start 2023-01-01
+
+# Multiple tickers with per-ticker breakdown
+python thermaltrend/backtest.py --strategy donchian --tickers AAPL MSFT GOOGL --per-ticker
+
+# Custom parameters
+python thermaltrend/backtest.py --strategy ma_crossover --ticker AAPL --params '{"fast_period": 20, "slow_period": 50}'
+
+# Include regime analysis
+python thermaltrend/backtest.py --strategy rsi_mean_reversion --ticker AAPL --regime
+
+# Export results to JSON
+python thermaltrend/backtest.py --strategy atr_trailing_stop --ticker AAPL --output result.json
+```
+
+Library usage:
+
+```python
+from thermaltrend.backtest import run_backtest
+
+result = run_backtest("ma_crossover", ["AAPL", "MSFT"], start_date="2023-01-01")
+print(result["metrics"])  # CAGR, Sharpe, Sortino, MaxDD, etc.
+```
+
+### Compare Strategies
+
+Compare multiple strategies side-by-side with SPY benchmark:
+
+```bash
+# Compare all strategies
+python thermaltrend/compare_cli.py --tickers AAPL MSFT GOOGL --start 2023-01-01
+
+# Compare specific strategies, sorted by Sharpe
+python thermaltrend/compare_cli.py --strategies ma_crossover donchian --ticker AAPL --sort-by sharpe
+
+# Export ranking to CSV
+python thermaltrend/compare_cli.py --tickers AAPL MSFT --output ranking.csv
+```
+
+Library usage:
+
+```python
+from thermaltrend.compare_cli import run_compare
+
+ranking = run_compare(tickers=["AAPL", "MSFT", "GOOGL"], start_date="2023-01-01")
+print(ranking)
+```
+
+### Signal Store
+
+Persist signals, query history, and annotate which ones you traded:
+
+```bash
+# List all saved signal runs
+python thermaltrend/signal_store.py list
+
+# Show signals from a specific run
+python thermaltrend/signal_store.py show <run_id>
+
+# Show signals from a date range
+python thermaltrend/signal_store.py show --from 2026-07-01 --to 2026-07-20
+
+# Annotate a signal (mark as acted or skipped)
+python thermaltrend/signal_store.py annotate <signal_id> --action acted --notes "Bought at $195"
+
+# Show pending signals (not yet acted on)
+python thermaltrend/signal_store.py pending
+```
+
 ### Analytics & Strategy Comparison
 
 Evaluate strategy performance and compare multiple strategies:
@@ -261,7 +328,7 @@ Event-driven design with 6 layers:
 1. **Data Layer** — download, update, inspect Parquet files + DataFeed
 2. **Event Queue** — MarketEvent → SignalEvent flow with strict chronological ordering
 3. **Strategy Engine** — Strategy ABC + 4 strategies: MA Crossover, Donchian Breakout, RSI Mean Reversion, ATR Trailing Stop
-4. **Analytics & Reporting** — Trade simulation, metrics, regime analysis, strategy ranking (built)
+4. **Analytics & Reporting** — Trade simulation, metrics, regime analysis, strategy ranking, signal persistence
 5. **Execution Handler** — simulated fills + live broker bridge (planned)
 6. **Portfolio & Risk** — position sizing, risk management (planned)
 

@@ -17,11 +17,13 @@ Working pipeline: **DataFeed → DataEngine → Strategy → SignalEvents → Tr
 | Signals CLI (`signals.py`) | Built |
 | Analytics & Metrics | Built |
 | Strategy Library (multi-class) | 4 of ~6 strategies |
-| Signal Persistence | Not built |
+| Backtest CLI (`backtest.py`) | Built |
+| Compare CLI (`compare_cli.py`) | Built |
+| Signal Persistence (`signal_store.py`) | Built |
 | Portfolio & Risk | Not built |
 | Execution Handler | Not built |
 
-Source: ~2,320 lines across 14 modules. Tests: ~3,100 lines across 18 files (194 unit tests).
+Source: ~2,800 lines across 17 modules. Tests: ~3,400 lines across 21 files (223 unit tests).
 
 ---
 
@@ -46,6 +48,12 @@ thermaltrend/analytics/
 - Market regime analysis (BULL/BEAR/SIDEWAYS)
 - Confidence score (0.0–1.0) based on sample size, consistency, ticker diversity
 - SPY buy-and-hold benchmark comparison
+
+**CLI tools:**
+- `backtest.py` — single-strategy backtest with metrics, per-ticker breakdown, regime analysis, JSON/CSV export
+- `compare_cli.py` — multi-strategy comparison with ranking table and SPY benchmark
+- `signal_store.py` — list, show, annotate, and query saved signal runs
+- `signals.py --save` — persist signals directly from the signal generation tool
 
 ---
 
@@ -78,16 +86,45 @@ thermaltrend/
 
 The existing `Strategy` ABC is already clean — each new strategy is just a new file implementing `on_market(event) -> SignalEvent | None`. The signals CLI already has a `--strategy` flag with a registry dict, so adding a strategy name there makes it immediately CLI-runnable.
 
-### Phase 2 (cont.): Signal Logging
+### Phase 2 (cont.): Signal Logging ← Built
 
-Currently signals vanish after the CLI prints them. You need persistence to track which ones you acted on.
+```python
+from thermaltrend.signal_store import SignalStore
+
+store = SignalStore()
+run_id = store.save(signals, "ma_crossover", ["AAPL", "MSFT"])
+store.annotate(signal_id, "acted", notes="Entered at $195")
+pending = store.get_pending_signals()
+```
+
+Saved to `thermaltrend/data/signals/` (one Parquet per run) and `thermaltrend/data/actions/` (annotations).
+
+### Phase 3: Strategy Library (4 of 6 built)
+
+You need multiple strategies to have anything meaningful to compare. Build simplest first — each teaches something about the framework's flexibility.
+
+| # | Strategy | Class | Why | Complexity |
+|---|----------|-------|-----|------------|
+| 1 | MACrossover | Trend | Built | Done |
+| 2 | Donchian Breakout | Trend | Complementary to MA (entry/exit logic differs) | Done |
+| 3 | RSI Mean Reversion | Mean Reversion | Tests a completely different regime (sideways markets) | Done |
+| 4 | ATR Trailing Stop | Trend | Volatility-based risk management | Done |
+| 5 | Dual Momentum | Momentum | Cross-asset relative strength | Medium |
+| 6 | Simple Factor Scoring | Factor | Multi-signal composite rank | Medium-High |
 
 ```
 thermaltrend/
-└── signal_store.py   # Save/load signals to Parquet with timestamps, metadata, action tracking
+└── strategy/
+    ├── __init__.py
+    ├── ma_crossover.py        # Move existing MACrossoverStrategy here
+    ├── donchian_breakout.py
+    ├── rsi_mean_reversion.py
+    ├── atr_trailing_stop.py
+    ├── dual_momentum.py
+    └── factor_scorer.py
 ```
 
-**What it enables:** Run signals daily, save them, annotate which ones you traded, compute actual PnL later.
+The existing `Strategy` ABC is already clean — each new strategy is just a new file implementing `on_market(event) -> SignalEvent | None`. The signals CLI already has a `--strategy` flag with a registry dict, so adding a strategy name there makes it immediately CLI-runnable.
 
 ### Phase 4: Portfolio & Execution (for actual trading)
 
@@ -120,12 +157,12 @@ thermaltrend/
 ## Summary
 
 ```
-Phase 2 (done)    →  analytics/metrics.py + report.py + trade_simulator.py + regime.py + compare.py
-Phase 3 (partial) →  strategy/ — Donchian + RSI + ATR Trailing Stop built; dual momentum, factor scorer next
-Phase 2 (cont.)   →  signal_store.py (persistence)
-Phase 4 (soon)    →  portfolio/ package (position sizing, PnL)
-Phase 5 (later)   →  execution/ (OrderEvent, FillEvent, simulated fills)
-Phase 6 (future)  →  live broker bridge
+Phase 2 (done)      →  analytics/metrics.py + report.py + trade_simulator.py + regime.py + compare.py
+Phase 2 cont (done) →  signal_store.py + backtest.py + compare_cli.py (persistence + CLI tools)
+Phase 3 (partial)   →  4 of 6 strategies built; dual momentum, factor scorer next
+Phase 4 (next)      →  portfolio/ package (position sizing, PnL)
+Phase 5 (later)     →  execution/ (OrderEvent, FillEvent, simulated fills)
+Phase 6 (future)    →  live broker bridge
 ```
 
 **Next up:** Dual Momentum (cross-asset relative strength introduces a new dimension beyond single-ticker analysis) + Factor Scoring (multi-signal composite rank).
