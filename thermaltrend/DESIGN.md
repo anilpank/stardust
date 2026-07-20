@@ -2,7 +2,7 @@
 
 **Author:** Anil
 **Date:** July 2026
-**Status:** Phase 1-3 Partially Complete (Data Layer + Event Queue + Signal Generation + Analytics + 2 Phase 3 strategies)
+**Status:** Phase 1-3 Partially Complete (Data Layer + Event Queue + Signal Generation + Analytics + 3 Phase 3 strategies)
 
 ---
 
@@ -44,7 +44,7 @@ Six layers, four built:
 |-------|--------|------|
 | Data Layer | Built | Download, update, inspect Parquet files; `DataFeed` yields chronological bars |
 | Event Queue | Built | `MarketEvent` → `SignalEvent` flow via `EventQueue`; `DataEngine` orchestrates |
-| Strategy Engine | 3 strategies built | `Strategy` ABC + `MACrossoverStrategy`, `DonchianBreakoutStrategy`, `RSIMeanReversionStrategy`; ATR trailing stop, dual momentum, factor scoring planned |
+| Strategy Engine | 4 strategies built | `Strategy` ABC + `MACrossoverStrategy`, `DonchianBreakoutStrategy`, `RSIMeanReversionStrategy`, `ATRTrailingStopStrategy`; dual momentum, factor scoring planned |
 | Analytics & Reporting | Built | Trade simulation, metrics, regime analysis, strategy ranking, benchmark comparison |
 | Execution Handler | Planned | Simulated fills, slippage models, live broker bridge |
 | Portfolio & Risk | Planned | Position sizing, risk rules, PnL tracking |
@@ -271,6 +271,13 @@ Six layers, four built:
 - This is necessary — MAs need lookback windows. A stateless strategy can only do instant decisions (e.g., "close > 200-day high → buy").
 - State is per-ticker, so the same strategy instance handles multiple tickers independently.
 
+**Why ATR Trailing Stop manages its own exit:**
+- Unlike MA Crossover/Donchian/RSI (which exit via indicator signals), ATR Trailing Stop exits via a volatility-adaptive price level that ratchets upward.
+- The trailing stop is: `highest_high_since_entry - (atr_multiple × ATR)`. It only moves up, never down.
+- This strategy emits SELL signals when `close < trailing_stop`, which the TradeSimulator processes at next-day open — same as all other strategies.
+- When using this strategy, set `TradeSimulator(stop_atr_multiple=0.0)` to disable the simulator's static ATR stop (the strategy manages its own risk).
+- The trailing stop is computed incrementally from bar data using Wilder's smoothing for ATR — no lookahead, no external dependencies.
+
 ### 4.5 DataEngine (`core/engine.py`)
 
 **Why a separate Engine class:**
@@ -339,7 +346,7 @@ Six layers, four built:
 |------------|--------|------------|
 | Daily bars only | Can't detect intraday patterns | Sufficient for initial validation; intraday support planned for P6 |
 | No signal persistence | Signals from previous days are lost | Next step: save signals to Parquet |
-| Single strategy | Can't combine signals or compare strategies | Strategy library expansion planned in P3 |
+| Single strategy | Can't combine signals or compare strategies | Strategy library expansion in P3 (4 of 6 built) |
 | No position sizing beyond fixed $10K | Real portfolio allocation not modeled | Planned in Portfolio layer |
 | No walk-forward validation | Overfitting risk not addressed | Deferred — rolling out-of-sample windows |
 | No slippage/commission modeling | Trade costs not reflected in metrics | Planned with Execution Handler |
@@ -351,7 +358,7 @@ Six layers, four built:
 
 ### Phase 3: Strategy Expansion (Multi-Class) — Partially Complete
 Implement strategies across multiple classes to cast a wide net:
-- **Trend Following:** Donchian Channel Breakout ✅, ATR Trailing Stop (planned), Adaptive MA (KAMA)
+- **Trend Following:** Donchian Channel Breakout ✅, ATR Trailing Stop ✅, Adaptive MA (KAMA)
 - **Momentum:** Dual Momentum (absolute + relative), Sector Rotation, RSI momentum
 - **Mean Reversion:** RSI-based entries ✅, Bollinger Band bounce
 - **Factor-Based:** Simple value/quality/momentum factor scoring

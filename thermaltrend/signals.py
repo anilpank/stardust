@@ -11,6 +11,7 @@ from pathlib import Path
 
 from thermaltrend.core.engine import DataEngine
 from thermaltrend.core.strategy import (
+    ATRTrailingStopStrategy,
     DonchianBreakoutStrategy,
     MACrossoverStrategy,
     RSIMeanReversionStrategy,
@@ -24,6 +25,9 @@ STRATEGIES = {
     "donchian": lambda: DonchianBreakoutStrategy(entry_period=20, exit_period=10),
     "rsi_mean_reversion": lambda: RSIMeanReversionStrategy(
         period=14, oversold=30.0, overbought=70.0
+    ),
+    "atr_trailing_stop": lambda: ATRTrailingStopStrategy(
+        entry_period=20, atr_period=14, atr_multiple=3.0
     ),
 }
 

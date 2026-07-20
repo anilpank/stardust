@@ -2,7 +2,7 @@
 
 ## What This Project Is
 
-An early-stage Python project called **Thermaltrend** — an event-driven backtesting and live-trading system for **testing, validating, and selecting the best performing strategies** on S&P 500 equities. Not limited to trend-following — encompasses momentum, mean reversion, factor-based, and any strategy class that can be plugged into the `Strategy` ABC. The **data acquisition layer**, **data feed**, **event queue with signal generation**, **analytics & metrics layer**, and **multi-class strategy library** (MA Crossover, Donchian Breakout, RSI Mean Reversion) are built.
+An early-stage Python project called **Thermaltrend** — an event-driven backtesting and live-trading system for **testing, validating, and selecting the best performing strategies** on S&P 500 equities. Not limited to trend-following — encompasses momentum, mean reversion, factor-based, and any strategy class that can be plugged into the `Strategy` ABC. The **data acquisition layer**, **data feed**, **event queue with signal generation**, **analytics & metrics layer**, and **multi-class strategy library** (MA Crossover, Donchian Breakout, RSI Mean Reversion, ATR Trailing Stop) are built.
 
 - **Remote:** https://github.com/anilpank/stardust
 - **Python:** 3.13.5 (uses 3.12+ features like `list[str] | None`)
@@ -18,10 +18,10 @@ The data pipeline, event-driven engine, and analytics module are built. Data is 
 | Parquet files | 502 (501 S&P 500 tickers + SPY) |
 | Data range | 1970 → Jul 19 2026 (varies by ticker) |
 | Columns | Open, High, Low, Close, Volume (auto-adjusted) |
-| Strategies | 3 (MA Crossover, Donchian Breakout, RSI Mean Reversion) |
-| Total source code | ~2,170 lines across 14 modules |
-| Total test code | ~2,860 lines across 18 test files (183 unit tests) |
-| Git commits | 26 |
+| Strategies | 4 (MA Crossover, Donchian Breakout, RSI Mean Reversion, ATR Trailing Stop) |
+| Total source code | ~2,320 lines across 14 modules |
+| Total test code | ~3,100 lines across 18 test files (194 unit tests) |
+| Git commits | 27 |
 
 ## Scripts
 
@@ -31,7 +31,7 @@ The data pipeline, event-driven engine, and analytics module are built. Data is 
 | `update_data.py` | Incremental update (downloads only missing days) | `cd thermaltrend && python update_data.py` |
 | `show_start_dates.py` | Inspect data availability per ticker | `cd thermaltrend && python show_start_dates.py` |
 | `feed.py` | Load Parquet files as chronological bars (CLI + library) | `cd thermaltrend && python feed.py` |
-| `signals.py` | Generate trading signals from strategy (CLI + library) | `cd thermaltrend && python -m thermaltrend.signals --strategy ma_crossover\|donchian\|rsi_mean_reversion` |
+| `signals.py` | Generate trading signals from strategy (CLI + library) | `cd thermaltrend && python -m thermaltrend.signals --strategy ma_crossover\|donchian\|rsi_mean_reversion\|atr_trailing_stop` |
 
 All scripts accept `--tickers AAPL MSFT` for specific tickers and `--output PATH` for custom directories.
 
@@ -40,7 +40,7 @@ All scripts accept `--tickers AAPL MSFT` for specific tickers and `--output PATH
 ```python
 from thermaltrend.feed import DataFeed
 from thermaltrend.core.engine import DataEngine
-from thermaltrend.core.strategy import MACrossoverStrategy, DonchianBreakoutStrategy, RSIMeanReversionStrategy
+from thermaltrend.core.strategy import MACrossoverStrategy, DonchianBreakoutStrategy, RSIMeanReversionStrategy, ATRTrailingStopStrategy
 from thermaltrend.analytics.compare import run_strategy_analysis, compare_strategies
 from thermaltrend.analytics.metrics import compute_benchmark_metrics
 from thermaltrend.analytics.report import format_ranking_table, format_per_ticker_table, format_regime_table
@@ -52,6 +52,7 @@ strategies = {
     "MA 50/200": MACrossoverStrategy(50, 200),
     "Donchian 20/10": DonchianBreakoutStrategy(20, 10),
     "RSI 14": RSIMeanReversionStrategy(14, 30.0, 70.0),
+    "ATR Trailing Stop": ATRTrailingStopStrategy(20, 14, 3.0),
 }
 
 results = {}
@@ -89,11 +90,12 @@ pytest thermaltrend/tests/ -v
 # Run specific strategy
 python -m thermaltrend.signals --strategy donchian --tickers AAPL MSFT --start 2024-01-01
 python -m thermaltrend.signals --strategy rsi_mean_reversion --tickers AAPL MSFT --start 2024-01-01
+python -m thermaltrend.signals --strategy atr_trailing_stop --tickers AAPL MSFT --start 2024-01-01
 ```
 
 Test files:
 - `tests/test_events.py` — EventQueue, MarketEvent, SignalEvent (17 tests)
-- `tests/test_strategy.py` — MACrossoverStrategy, DonchianBreakoutStrategy, RSIMeanReversionStrategy (26 tests)
+- `tests/test_strategy.py` — MACrossoverStrategy, DonchianBreakoutStrategy, RSIMeanReversionStrategy, ATRTrailingStopStrategy (37 tests)
 - `tests/test_engine.py` — DataEngine integration (6 tests)
 - `tests/test_signals.py` — signals.py CLI + formatting (6 tests)
 - `tests/test_trade_simulator.py` — Trade simulation with ATR stops (11 tests)
@@ -114,7 +116,7 @@ Pre-commit hook: `.pre-commit-config.yaml` runs `pytest -m "not slow" -q` on eve
 | `thermaltrend/feed.py` | `DataFeed` class + `Bar` dataclass — loads Parquet files, yields bars chronologically |
 | `thermaltrend/signals.py` | Signal output CLI — runs strategy on data feed, outputs ranked trading signals |
 | `thermaltrend/core/events.py` | Event types (`MarketEvent`, `SignalEvent`) and `EventQueue` (deque-based FIFO) |
-| `thermaltrend/core/strategy.py` | Strategy ABC + `MACrossoverStrategy`, `DonchianBreakoutStrategy`, `RSIMeanReversionStrategy` |
+| `thermaltrend/core/strategy.py` | Strategy ABC + `MACrossoverStrategy`, `DonchianBreakoutStrategy`, `RSIMeanReversionStrategy`, `ATRTrailingStopStrategy` |
 | `thermaltrend/core/engine.py` | `DataEngine` — main event loop connecting DataFeed → Strategy → Signals |
 | `thermaltrend/analytics/trade_simulator.py` | Converts SignalEvents into simulated Trades with ATR stops, $10K sizing |
 | `thermaltrend/analytics/metrics.py` | CAGR, Sharpe, Sortino, MaxDD, Calmar, win rate, profit factor, confidence score |
@@ -145,7 +147,7 @@ The planned system has 6 layers:
 
 1. **Data Layer** ← built (download, update, inspect scripts + `DataFeed` for event-driven consumption)
 2. **Event Queue** ← built (MarketEvent, SignalEvent, EventQueue + DataEngine + MACrossoverStrategy + signals CLI)
-3. **Strategy Engine** ← 3 of ~6 strategies built (MACrossoverStrategy, DonchianBreakoutStrategy, RSIMeanReversionStrategy); ATR trailing stop, dual momentum, factor scoring still planned
+3. **Strategy Engine** ← 4 of ~6 strategies built (MACrossoverStrategy, DonchianBreakoutStrategy, RSIMeanReversionStrategy, ATRTrailingStopStrategy); dual momentum, factor scoring still planned
 4. **Analytics & Reporting** ← built (trade simulation, metrics, regime analysis, strategy ranking, benchmark comparison)
 5. **Execution Handler** (simulated + live broker bridge)
 6. **Portfolio & Risk** (position sizing, risk management)
@@ -161,7 +163,7 @@ pip install pandas numpy yfinance requests pyarrow pytest pre-commit
 ## If Starting a New Session
 
 - Run `git log --oneline -5` to see recent commits
-- Run `pytest thermaltrend/tests/ -m "not slow" -v` to confirm tests pass (152 unit tests)
+- Run `pytest thermaltrend/tests/ -m "not slow" -v` to confirm tests pass (194 unit tests)
 - Run `python thermaltrend/update_data.py --tickers AAPL` to verify the data pipeline works
 - Run `python thermaltrend/feed.py` to verify the data feed loads correctly
 - Run `python -m thermaltrend.signals --tickers AAPL MSFT --start 2024-01-01` to verify signal generation works
@@ -181,4 +183,4 @@ result = run_strategy_analysis(signals, feed._data, "MA 20/50")
 print(result["metrics"])
 ```
 
-- Check `thermaltrend/DESIGN.md` if planning the next phase of development (ATR trailing stop, dual momentum, factor scoring strategies)
+- Check `thermaltrend/DESIGN.md` if planning the next phase of development (dual momentum, factor scoring strategies, signal persistence)

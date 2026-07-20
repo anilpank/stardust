@@ -16,12 +16,12 @@ Working pipeline: **DataFeed → DataEngine → Strategy → SignalEvents → Tr
 | Strategy Engine (Strategy ABC + MACrossoverStrategy) | Built |
 | Signals CLI (`signals.py`) | Built |
 | Analytics & Metrics | Built |
-| Strategy Library (multi-class) | 3 of ~6 strategies |
+| Strategy Library (multi-class) | 4 of ~6 strategies |
 | Signal Persistence | Not built |
 | Portfolio & Risk | Not built |
 | Execution Handler | Not built |
 
-Source: ~2,170 lines across 14 modules. Tests: ~2,860 lines across 18 files (183 unit tests).
+Source: ~2,320 lines across 14 modules. Tests: ~3,100 lines across 18 files (194 unit tests).
 
 ---
 
@@ -60,7 +60,7 @@ You need multiple strategies to have anything meaningful to compare. Build simpl
 | 1 | MACrossover | Trend | Built | Done |
 | 2 | Donchian Breakout | Trend | Complementary to MA (entry/exit logic differs) | Done |
 | 3 | RSI Mean Reversion | Mean Reversion | Tests a completely different regime (sideways markets) | Done |
-| 4 | ATR Trailing Stop | Trend | Volatility-based risk management | Medium |
+| 4 | ATR Trailing Stop | Trend | Volatility-based risk management | Done |
 | 5 | Dual Momentum | Momentum | Cross-asset relative strength | Medium |
 | 6 | Simple Factor Scoring | Factor | Multi-signal composite rank | Medium-High |
 
@@ -121,11 +121,11 @@ thermaltrend/
 
 ```
 Phase 2 (done)    →  analytics/metrics.py + report.py + trade_simulator.py + regime.py + compare.py
-Phase 3 (partial) →  strategy/ — Donchian + RSI built; ATR trailing stop, dual momentum, factor scorer next
+Phase 3 (partial) →  strategy/ — Donchian + RSI + ATR Trailing Stop built; dual momentum, factor scorer next
 Phase 2 (cont.)   →  signal_store.py (persistence)
 Phase 4 (soon)    →  portfolio/ package (position sizing, PnL)
 Phase 5 (later)   →  execution/ (OrderEvent, FillEvent, simulated fills)
 Phase 6 (future)  →  live broker bridge
 ```
 
-**Next up:** ATR Trailing Stop (volatility-based exits complement the existing trend strategies) + Dual Momentum (cross-asset relative strength introduces a new dimension beyond single-ticker analysis).
+**Next up:** Dual Momentum (cross-asset relative strength introduces a new dimension beyond single-ticker analysis) + Factor Scoring (multi-signal composite rank).

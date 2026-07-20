@@ -450,3 +450,212 @@ class TestDonchianBreakoutReEntry:
         assert signals[0].direction == SignalDirection.BUY
         assert signals[1].direction == SignalDirection.SELL
         assert signals[2].direction == SignalDirection.BUY
+
+
+class TestATRTrailingStopStrategy:
+    def test_no_signal_before_warmup(self):
+        from thermaltrend.core.strategy import ATRTrailingStopStrategy
+
+        s = ATRTrailingStopStrategy(entry_period=5, atr_period=3)
+        dates = [datetime(2026, 1, i + 1) for i in range(4)]
+        prices = [(d, 100.0 + i) for i, d in enumerate(dates)]
+        signals = _run_strategy(prices, s)
+        assert len(signals) == 0
+
+    def test_buy_on_breakout(self):
+        from thermaltrend.core.strategy import ATRTrailingStopStrategy
+
+        s = ATRTrailingStopStrategy(entry_period=5, atr_period=3, atr_multiple=3.0)
+        dates = [datetime(2026, 1, i + 1) for i in range(7)]
+        # First 5 bars: price in 100-104 range
+        # Bar 5: breaks above 5-day high of 104
+        prices = [
+            (dates[0], 100.0), (dates[1], 101.0), (dates[2], 102.0),
+            (dates[3], 103.0), (dates[4], 104.0),
+            (dates[5], 110.0),  # breakout
+        ]
+        signals = _run_strategy(prices, s)
+        assert len(signals) == 1
+        assert signals[0].direction == SignalDirection.BUY
+
+    def test_sell_on_trailing_stop_hit(self):
+        from thermaltrend.core.strategy import ATRTrailingStopStrategy
+
+        s = ATRTrailingStopStrategy(entry_period=3, atr_period=3, atr_multiple=2.0)
+        dates = [datetime(2026, 1, i + 1) for i in range(12)]
+        prices = [
+            # Warmup: 3 bars to establish ATR baseline
+            (dates[0], 100.0), (dates[1], 100.0), (dates[2], 100.0),
+            # Bars 3-5: steady uptrend (breakout above 100)
+            (dates[3], 102.0), (dates[4], 104.0), (dates[5], 106.0),
+            # Bars 6-7: small pullback (stays above trailing stop)
+            (dates[6], 105.0), (dates[7], 103.0),
+            # Bars 8-9: sharp drop (hits trailing stop)
+            (dates[8], 98.0), (dates[9], 95.0),
+        ]
+        signals = _run_strategy(prices, s)
+        buys = [s for s in signals if s.direction == SignalDirection.BUY]
+        sells = [s for s in signals if s.direction == SignalDirection.SELL]
+        assert len(buys) == 1
+        assert len(sells) >= 1
+
+    def test_trailing_stop_ratchets_up(self):
+        from thermaltrend.core.strategy import ATRTrailingStopStrategy
+
+        s = ATRTrailingStopStrategy(entry_period=3, atr_period=3, atr_multiple=2.0)
+        dates = [datetime(2026, 1, i + 1) for i in range(8)]
+        prices = [
+            # Warmup
+            (dates[0], 100.0), (dates[1], 100.0), (dates[2], 100.0),
+            # Breakout
+            (dates[3], 105.0),
+            # New high → stop should ratchet up
+            (dates[4], 110.0),
+            # Pullback but above stop → no sell
+            (dates[5], 107.0),
+        ]
+        signals = _run_strategy(prices, s)
+        buys = [s for s in signals if s.direction == SignalDirection.BUY]
+        sells = [s for s in signals if s.direction == SignalDirection.SELL]
+        assert len(buys) == 1
+        assert len(sells) == 0
+        # Stop should have ratcheted up between entry and new high
+        stop_at_entry = buys[0].metadata["trailing_stop"]
+        assert stop_at_entry > 0
+
+    def test_no_signal_within_channel(self):
+        from thermaltrend.core.strategy import ATRTrailingStopStrategy
+
+        s = ATRTrailingStopStrategy(entry_period=5, atr_period=3)
+        dates = [datetime(2026, 1, i + 1) for i in range(8)]
+        # Price oscillates but stays within channel, no breakout
+        prices = [
+            (dates[0], 100.0), (dates[1], 101.0), (dates[2], 102.0),
+            (dates[3], 103.0), (dates[4], 104.0),
+            (dates[5], 103.0), (dates[6], 102.0), (dates[7], 103.0),
+        ]
+        signals = _run_strategy(prices, s)
+        assert len(signals) == 0
+
+    def test_strength_bounded(self):
+        from thermaltrend.core.strategy import ATRTrailingStopStrategy
+
+        s = ATRTrailingStopStrategy(entry_period=3, atr_period=3)
+        dates = [datetime(2026, 1, i + 1) for i in range(7)]
+        prices = [
+            (dates[0], 100.0), (dates[1], 100.0), (dates[2], 100.0),
+            (dates[3], 105.0), (dates[4], 110.0), (dates[5], 115.0),
+            (dates[6], 120.0),
+        ]
+        signals = _run_strategy(prices, s)
+        for sig in signals:
+            assert 0.0 <= sig.strength <= 1.0
+
+    def test_strategy_id(self):
+        from thermaltrend.core.strategy import ATRTrailingStopStrategy
+
+        s = ATRTrailingStopStrategy(
+            entry_period=3, atr_period=3, strategy_id="my_atr"
+        )
+        dates = [datetime(2026, 1, i + 1) for i in range(7)]
+        prices = [
+            (dates[0], 100.0), (dates[1], 100.0), (dates[2], 100.0),
+            (dates[3], 105.0), (dates[4], 110.0), (dates[5], 115.0),
+            (dates[6], 120.0),
+        ]
+        signals = _run_strategy(prices, s)
+        for sig in signals:
+            assert sig.strategy_id == "my_atr"
+
+    def test_metadata_populated(self):
+        from thermaltrend.core.strategy import ATRTrailingStopStrategy
+
+        s = ATRTrailingStopStrategy(entry_period=3, atr_period=3)
+        dates = [datetime(2026, 1, i + 1) for i in range(7)]
+        prices = [
+            (dates[0], 100.0), (dates[1], 100.0), (dates[2], 100.0),
+            (dates[3], 105.0), (dates[4], 110.0), (dates[5], 115.0),
+            (dates[6], 120.0),
+        ]
+        signals = _run_strategy(prices, s)
+        for sig in signals:
+            assert "trailing_stop" in sig.metadata
+            assert "atr" in sig.metadata
+            assert "highest_since_entry" in sig.metadata
+            assert "atr_multiple" in sig.metadata
+            assert sig.metadata["atr_multiple"] == 3.0
+
+    def test_independent_tickers(self):
+        from thermaltrend.core.strategy import ATRTrailingStopStrategy
+
+        s = ATRTrailingStopStrategy(entry_period=3, atr_period=3)
+        dates = [datetime(2026, 1, i + 1) for i in range(7)]
+
+        for i, d in enumerate(dates):
+            close = [100, 100, 100, 105, 110, 115, 120][i]
+            s.on_market(_market("AAPL", d, close))
+
+        for i, d in enumerate(dates):
+            close = [100, 95, 90, 85, 80, 75, 70][i]
+            s.on_market(_market("MSFT", d, close))
+
+        assert len(s._closes["AAPL"]) == 7
+        assert len(s._closes["MSFT"]) == 7
+        assert s._in_position["AAPL"] is True
+        assert s._in_position["MSFT"] is False
+
+    def test_re_entry_after_exit(self):
+        from thermaltrend.core.strategy import ATRTrailingStopStrategy
+
+        s = ATRTrailingStopStrategy(entry_period=3, atr_period=3, atr_multiple=2.0)
+        dates = [datetime(2026, 1, i + 1) for i in range(12)]
+        prices = [
+            # Warmup
+            (dates[0], 100.0), (dates[1], 100.0), (dates[2], 100.0),
+            # Phase 1: breakout → BUY
+            (dates[3], 105.0),
+            # Phase 2: pullback → SELL (trailing stop hit)
+            (dates[4], 95.0),
+            # Phase 3: recovery and new breakout → BUY again
+            (dates[5], 96.0), (dates[6], 97.0), (dates[7], 98.0),
+            (dates[8], 105.0),  # new breakout above recent highs
+        ]
+        signals = _run_strategy(prices, s)
+        buys = [s for s in signals if s.direction == SignalDirection.BUY]
+        sells = [s for s in signals if s.direction == SignalDirection.SELL]
+        assert len(buys) >= 1
+        assert len(sells) >= 1
+        assert buys[0].timestamp < sells[0].timestamp
+
+    def test_wide_stop_on_volatile_stock(self):
+        from thermaltrend.core.strategy import ATRTrailingStopStrategy
+
+        # Volatile stock: large daily ranges → wider stop
+        s_volatile = ATRTrailingStopStrategy(entry_period=3, atr_period=3, atr_multiple=2.0)
+        # Calm stock: small daily ranges → tighter stop
+        s_calm = ATRTrailingStopStrategy(entry_period=3, atr_period=3, atr_multiple=2.0)
+
+        dates = [datetime(2026, 1, i + 1) for i in range(7)]
+
+        for i, d in enumerate(dates):
+            close = [100, 100, 100, 110, 120, 130, 140][i]
+            s_volatile.on_market(_market("VOL", d, close))
+
+        for i, d in enumerate(dates):
+            close = [100, 100.5, 101, 101.5, 102, 102.5, 103][i]
+            s_calm.on_market(_market("CALM", d, close))
+
+        # Both should have entered
+        assert s_volatile._in_position["VOL"] is True
+        assert s_calm._in_position["CALM"] is True
+
+        # Volatile stock should have wider trailing stop distance
+        volatile_dist = (
+            s_volatile._highest_since_entry["VOL"]
+            - s_volatile._trailing_stop["VOL"]
+        )
+        calm_dist = (
+            s_calm._highest_since_entry["CALM"]
+            - s_calm._trailing_stop["CALM"]
+        )
+        assert volatile_dist > calm_dist

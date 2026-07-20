@@ -285,3 +285,188 @@ class RSIMeanReversionStrategy(Strategy):
             )
 
         return None
+
+
+class ATRTrailingStopStrategy(Strategy):
+    """ATR Trailing Stop (Chandelier Exit) strategy.
+
+    Generates BUY when close breaks above the N-day high (breakout entry).
+    Generates SELL when close drops below the trailing stop level, which is
+    computed as the highest high since entry minus ``atr_multiple`` times ATR.
+
+    The trailing stop only ratchets upward — it never moves down. This ensures
+    the exit level tightens as the trend extends, protecting accumulated gains.
+
+    Requires ``entry_period + 1`` bars before producing any signals (same as
+    DonchianBreakoutStrategy). ATR requires ``atr_period + 1`` bars, but since
+    ``entry_period`` (default 20) > ``atr_period`` (default 14), ATR is always
+    ready before the first possible entry signal.
+    """
+
+    def __init__(
+        self,
+        entry_period: int = 20,
+        atr_period: int = 14,
+        atr_multiple: float = 3.0,
+        strategy_id: str = "atr_trailing_stop",
+    ) -> None:
+        self.entry_period = entry_period
+        self.atr_period = atr_period
+        self.atr_multiple = atr_multiple
+        self.strategy_id = strategy_id
+        self._highs: dict[str, list[float]] = {}
+        self._lows: dict[str, list[float]] = {}
+        self._closes: dict[str, list[float]] = {}
+        self._in_position: dict[str, bool] = {}
+        self._highest_since_entry: dict[str, float] = {}
+        self._trailing_stop: dict[str, float] = {}
+        self._atr: dict[str, float | None] = {}
+        self._prev_tr: dict[str, float | None] = {}
+        self._atr_initialized: dict[str, bool] = {}
+
+    def _update_atr(self, ticker: str) -> float | None:
+        """Compute ATR using Wilder's smoothing method.
+
+        Returns None if fewer than ``atr_period + 1`` bars have been seen
+        (need at least one true range value).
+        """
+        highs = self._highs[ticker]
+        lows = self._lows[ticker]
+        closes = self._closes[ticker]
+
+        if len(closes) < 2:
+            return None
+
+        h = highs[-1]
+        l = lows[-1]
+        prev_c = closes[-2]
+        tr = max(h - l, abs(h - prev_c), abs(l - prev_c))
+
+        if not self._atr_initialized[ticker]:
+            if len(closes) < self.atr_period + 1:
+                self._prev_tr[ticker] = tr
+                return None
+            # Seed: SMA of first atr_period true ranges
+            total = 0.0
+            for i in range(1, self.atr_period + 1):
+                th = highs[i]
+                tl = lows[i]
+                tcp = closes[i - 1]
+                total += max(th - tl, abs(th - tcp), abs(tl - tcp))
+            atr = total / self.atr_period
+            self._atr[ticker] = atr
+            self._atr_initialized[ticker] = True
+            return atr
+
+        prev_atr = self._atr[ticker]
+        if prev_atr is None:
+            return None
+        atr = (prev_atr * (self.atr_period - 1) + tr) / self.atr_period
+        self._atr[ticker] = atr
+        return atr
+
+    def on_market(self, event: MarketEvent) -> SignalEvent | None:
+        ticker = event.ticker
+        if ticker not in self._highs:
+            self._highs[ticker] = []
+            self._lows[ticker] = []
+            self._closes[ticker] = []
+            self._in_position[ticker] = False
+            self._highest_since_entry[ticker] = 0.0
+            self._trailing_stop[ticker] = 0.0
+            self._atr[ticker] = None
+            self._prev_tr[ticker] = None
+            self._atr_initialized[ticker] = False
+
+        self._highs[ticker].append(event.high)
+        self._lows[ticker].append(event.low)
+        self._closes[ticker].append(event.close)
+
+        atr = self._update_atr(ticker)
+
+        if not self._in_position[ticker]:
+            if len(self._highs[ticker]) < self.entry_period + 1:
+                return None
+
+            highs = self._highs[ticker]
+            channel_high = max(highs[-(self.entry_period + 1) : -1])
+
+            if event.close > channel_high:
+                self._in_position[ticker] = True
+                self._highest_since_entry[ticker] = event.high
+
+                if atr is not None and atr > 0:
+                    self._trailing_stop[ticker] = event.high - (
+                        self.atr_multiple * atr
+                    )
+                else:
+                    self._trailing_stop[ticker] = 0.0
+
+                strength = 0.5
+                if atr is not None and atr > 0:
+                    strength = min(
+                        (event.close - self._trailing_stop[ticker])
+                        / event.close,
+                        1.0,
+                    )
+
+                return SignalEvent(
+                    timestamp=event.timestamp,
+                    ticker=ticker,
+                    direction=SignalDirection.BUY,
+                    strength=round(max(strength, 0.01), 4),
+                    strategy_id=self.strategy_id,
+                    metadata={
+                        "trailing_stop": round(self._trailing_stop[ticker], 4),
+                        "atr": round(atr, 4) if atr is not None else None,
+                        "highest_since_entry": round(
+                            self._highest_since_entry[ticker], 4
+                        ),
+                        "entry_period": self.entry_period,
+                        "atr_period": self.atr_period,
+                        "atr_multiple": self.atr_multiple,
+                    },
+                )
+
+        else:
+            self._highest_since_entry[ticker] = max(
+                self._highest_since_entry[ticker], event.high
+            )
+
+            if atr is not None and atr > 0:
+                new_stop = self._highest_since_entry[ticker] - (
+                    self.atr_multiple * atr
+                )
+                self._trailing_stop[ticker] = max(
+                    self._trailing_stop[ticker], new_stop
+                )
+
+            if (
+                atr is not None
+                and self._trailing_stop[ticker] > 0
+                and event.close < self._trailing_stop[ticker]
+            ):
+                self._in_position[ticker] = False
+                strength = min(
+                    (self._trailing_stop[ticker] - event.close) / event.close,
+                    1.0,
+                )
+                return SignalEvent(
+                    timestamp=event.timestamp,
+                    ticker=ticker,
+                    direction=SignalDirection.SELL,
+                    strength=round(max(strength, 0.01), 4),
+                    strategy_id=self.strategy_id,
+                    metadata={
+                        "trailing_stop": round(self._trailing_stop[ticker], 4),
+                        "atr": round(atr, 4),
+                        "highest_since_entry": round(
+                            self._highest_since_entry[ticker], 4
+                        ),
+                        "entry_period": self.entry_period,
+                        "atr_period": self.atr_period,
+                        "atr_multiple": self.atr_multiple,
+                    },
+                )
+
+        return None
