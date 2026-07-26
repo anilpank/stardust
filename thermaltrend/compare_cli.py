@@ -13,8 +13,8 @@ from pathlib import Path
 import pandas as pd
 
 from thermaltrend.analytics.compare import compare_strategies, run_strategy_analysis
-from thermaltrend.analytics.metrics import compute_benchmark_metrics
-from thermaltrend.analytics.report import format_ranking_table
+from thermaltrend.analytics.metrics import compute_benchmark_metrics, compute_period_metrics
+from thermaltrend.analytics.report import format_ranking_table, format_cross_strategy_period_table
 from thermaltrend.core.engine import DataEngine
 from thermaltrend.core.strategy import (
     ATRTrailingStopStrategy,
@@ -41,10 +41,10 @@ def run_compare(
     end_date: str | None = None,
     sort_by: str = "sharpe",
     data_dir: str = DEFAULT_DATA_DIR,
-) -> pd.DataFrame:
+) -> tuple[pd.DataFrame, dict[str, dict]]:
     """Run multi-strategy comparison. Library-friendly.
 
-    Returns a ranking DataFrame with one row per strategy.
+    Returns (ranking DataFrame, strategy_results dict).
     """
     if strategy_names is None:
         strategy_names = list(STRATEGY_REGISTRY.keys())
@@ -73,7 +73,7 @@ def run_compare(
     bench = compute_benchmark_metrics(spy, start_date or "1970-01-01", end_date or "2026-12-31")
 
     ranking = compare_strategies(results, benchmark_metrics=bench, sort_by=sort_by)
-    return ranking
+    return ranking, results
 
 
 def main():
@@ -96,6 +96,10 @@ def main():
     )
     parser.add_argument("--output", default=None, help="Export ranking to CSV")
     parser.add_argument(
+        "--period", default=None, choices=["monthly", "quarterly", "yearly"],
+        help="Show per-period strategy comparison",
+    )
+    parser.add_argument(
         "--data-dir", default=DEFAULT_DATA_DIR,
         help="Directory containing Parquet files",
     )
@@ -105,7 +109,7 @@ def main():
     if not tickers:
         parser.error("Provide --ticker or --tickers")
 
-    ranking = run_compare(
+    ranking, strategy_results = run_compare(
         tickers=tickers,
         strategy_names=args.strategies,
         start_date=args.start,
@@ -115,6 +119,9 @@ def main():
     )
 
     print(format_ranking_table(ranking))
+
+    if args.period:
+        print(format_cross_strategy_period_table(strategy_results, period=args.period))
 
     if args.output:
         out = Path(args.output)

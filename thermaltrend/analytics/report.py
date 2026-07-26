@@ -133,6 +133,64 @@ def format_regime_table(regime_metrics: dict[str, dict], strategy_name: str) -> 
     return "\n".join(lines)
 
 
+def format_period_table(
+    period_metrics: dict[str, dict], strategy_name: str, period: str = "monthly"
+) -> str:
+    """Format per-period breakdown as a terminal table."""
+    if not period_metrics:
+        return "No period data."
+
+    lines = []
+    lines.append(f"\n{period.title()} Performance: {strategy_name}")
+    lines.append("=" * 90)
+    lines.append(
+        f"{'Period':<10s}  {'Trades':>7s}  {'WinRate':>8s}  {'PF':>8s}  "
+        f"{'Avg PnL':>10s}  {'Total PnL':>12s}  {'Avg Days':>9s}"
+    )
+    lines.append("-" * 90)
+
+    total_pnl_all = 0.0
+    total_trades_all = 0
+    wins_all = 0
+
+    for label in sorted(period_metrics.keys()):
+        m = period_metrics[label]
+        trades = m.get("total_trades", 0)
+        if trades == 0:
+            lines.append(f"{label:<10s}  {'0':>7s}")
+            continue
+
+        total_pnl_all += m.get("total_pnl", 0)
+        total_trades_all += m.get("trades_completed", 0)
+        wr = m.get("win_rate", 0)
+        if wr is not None:
+            wins_all += int(round(wr * m.get("trades_completed", 0)))
+
+        lines.append(
+            f"{label:<10s}  {trades:>7d}  "
+            f"{_fmt_pct(m.get('win_rate')):>8s}  "
+            f"{_fmt_float(m.get('profit_factor')):>8s}  "
+            f"${m.get('avg_trade_pnl', 0):>9.2f}  "
+            f"${m.get('total_pnl', 0):>11.2f}  "
+            f"{m.get('avg_holding_days', 0):>9.1f}"
+        )
+
+    lines.append("-" * 90)
+    overall_wr = wins_all / total_trades_all if total_trades_all > 0 else 0.0
+    lines.append(
+        f"{'TOTAL':<10s}  {total_trades_all:>7d}  "
+        f"{_fmt_pct(overall_wr):>8s}  "
+        f"{'':>8s}  "
+        f"{'':>10s}  "
+        f"${total_pnl_all:>11.2f}  "
+        f"{'':>9s}"
+    )
+    lines.append("=" * 90)
+    lines.append("")
+
+    return "\n".join(lines)
+
+
 def format_signals_table(signals: list, strategy_name: str) -> str:
     """Format signals as a readable table (compatible with existing signals.py)."""
     if not signals:
@@ -148,6 +206,79 @@ def format_signals_table(signals: list, strategy_name: str) -> str:
             f"{s.timestamp.date()!s:12s} {s.ticker:8s} {s.direction.value:10s} "
             f"{s.strength:>10.4f}"
         )
+    return "\n".join(lines)
+
+
+def format_cross_strategy_period_table(
+    strategy_results: dict[str, dict], period: str = "monthly"
+) -> str:
+    """Format a cross-strategy period comparison table.
+
+    Shows Total PnL per period for each strategy, with the best highlighted.
+    """
+    if not strategy_results:
+        return "No strategy results to compare."
+
+    from thermaltrend.analytics.metrics import compute_period_metrics
+
+    strategy_names = list(strategy_results.keys())
+    all_period_metrics: dict[str, dict[str, dict]] = {}
+    for name in strategy_names:
+        trades = strategy_results[name].get("trades", [])
+        all_period_metrics[name] = compute_period_metrics(trades, period=period)
+
+    all_labels = sorted(
+        set().union(*(pm.keys() for pm in all_period_metrics.values()))
+    )
+    if not all_labels:
+        return "No period data."
+
+    lines = []
+    lines.append(f"\n{period.title()} Strategy Comparison (Total PnL)")
+    lines.append("=" * 90)
+
+    name_width = 18
+    col_width = 14
+    header = f"{'Period':<10s}"
+    for name in strategy_names:
+        header += f"  {name:>{col_width}s}"
+    lines.append(header)
+    lines.append("-" * 90)
+
+    totals = {name: 0.0 for name in strategy_names}
+
+    for label in all_labels:
+        row = f"{label:<10s}"
+        period_pnls = {}
+        for name in strategy_names:
+            pm = all_period_metrics[name].get(label, {})
+            pnl = pm.get("total_pnl", 0)
+            period_pnls[name] = pnl
+            totals[name] += pnl
+
+        if period_pnls:
+            best = max(period_pnls, key=period_pnls.get)
+        else:
+            best = None
+
+        for name in strategy_names:
+            pnl = period_pnls.get(name, 0)
+            marker = " *" if name == best and pnl > 0 else "  "
+            row += f"  ${pnl:>{col_width - 2}.2f}{marker}"
+        lines.append(row)
+
+    lines.append("-" * 90)
+    total_row = f"{'TOTAL':<10s}"
+    best_total = max(totals, key=totals.get) if totals else None
+    for name in strategy_names:
+        t = totals[name]
+        marker = " *" if name == best_total and t > 0 else "  "
+        total_row += f"  ${t:>{col_width - 2}.2f}{marker}"
+    lines.append(total_row)
+    lines.append("=" * 90)
+    lines.append("* = best performing strategy in that period")
+    lines.append("")
+
     return "\n".join(lines)
 
 

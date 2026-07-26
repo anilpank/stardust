@@ -43,7 +43,7 @@ class TestRunCompare:
         _make_parquet(tmp_path, "TEST", list(zip(dates, closes)))
         _make_spy(tmp_path, list(zip(dates, closes)))
 
-        ranking = run_compare(
+        ranking, strategy_results = run_compare(
             tickers=["TEST"],
             strategy_names=["ma_crossover", "donchian"],
             start_date="2026-01-01",
@@ -53,6 +53,8 @@ class TestRunCompare:
         assert len(ranking) >= 2  # strategies + benchmark
         assert "strategy" in ranking.columns
         assert "sharpe" in ranking.columns
+        assert isinstance(strategy_results, dict)
+        assert len(strategy_results) == 2
 
     def test_compare_all_strategies(self, tmp_path):
         dates = pd.bdate_range("2026-01-01", periods=50)
@@ -60,7 +62,7 @@ class TestRunCompare:
         _make_parquet(tmp_path, "TEST", list(zip(dates, closes)))
         _make_spy(tmp_path, list(zip(dates, closes)))
 
-        ranking = run_compare(
+        ranking, strategy_results = run_compare(
             tickers=["TEST"],
             start_date="2026-01-01",
             data_dir=str(tmp_path),
@@ -94,7 +96,7 @@ class TestRunCompare:
         _make_parquet(tmp_path, "TEST", list(zip(dates, closes)))
         _make_spy(tmp_path, list(zip(dates, closes)))
 
-        ranking = run_compare(
+        ranking, _ = run_compare(
             tickers=["TEST"],
             strategy_names=["ma_crossover", "donchian"],
             start_date="2026-01-01",
@@ -110,7 +112,7 @@ class TestRunCompare:
         _make_parquet(tmp_path, "TEST", list(zip(dates, closes)))
         _make_spy(tmp_path, list(zip(dates, closes)))
 
-        ranking = run_compare(
+        ranking, _ = run_compare(
             tickers=["TEST"],
             strategy_names=["ma_crossover"],
             start_date="2026-01-01",

@@ -19,8 +19,8 @@ The data pipeline, event-driven engine, and analytics module are built. Data is 
 | Data range | 1970 → Jul 19 2026 (varies by ticker) |
 | Columns | Open, High, Low, Close, Volume (auto-adjusted) |
 | Strategies | 4 (MA Crossover, Donchian Breakout, RSI Mean Reversion, ATR Trailing Stop) |
-| Total source code | ~2,800 lines across 17 modules |
-| Total test code | ~3,400 lines across 21 test files (223 unit tests) |
+| Total source code | ~3,000 lines across 17 modules |
+| Total test code | ~3,600 lines across 21 test files (235 unit tests) |
 | Git commits | 27 |
 
 ## Scripts
@@ -37,6 +37,35 @@ The data pipeline, event-driven engine, and analytics module are built. Data is 
 | `signal_store.py` | Persist, query, and annotate signals | `cd thermaltrend && python thermaltrend/signal_store.py list` |
 
 All scripts accept `--tickers AAPL MSFT` for specific tickers and `--output PATH` for custom directories.
+
+### Per-Period Breakdown
+
+The `--period` flag shows performance broken down by time period (monthly, quarterly, yearly):
+
+```bash
+# Single strategy with monthly breakdown
+python thermaltrend/backtest.py --strategy ma_crossover --ticker AAPL --start 2023-01-01 --period monthly
+
+# Compare strategies with quarterly period comparison
+python thermaltrend/compare_cli.py --tickers AAPL MSFT --start 2023-01-01 --period quarterly
+
+# Yearly breakdown
+python thermaltrend/backtest.py --strategy donchian --tickers AAPL MSFT --per-ticker --period yearly
+```
+
+Library usage:
+
+```python
+from thermaltrend.analytics.metrics import compute_period_metrics
+from thermaltrend.analytics.report import format_period_table, format_cross_strategy_period_table
+
+# Per-period metrics for a single strategy
+period_m = compute_period_metrics(trades, period="monthly")
+print(format_period_table(period_m, "MA Crossover", "monthly"))
+
+# Cross-strategy period comparison
+print(format_cross_strategy_period_table(strategy_results, period="quarterly"))
+```
 
 ## Analytics Usage
 
@@ -122,10 +151,10 @@ Test files:
 - `tests/test_engine.py` — DataEngine integration (6 tests)
 - `tests/test_signals.py` — signals.py CLI + formatting (6 tests)
 - `tests/test_trade_simulator.py` — Trade simulation with ATR stops (11 tests)
-- `tests/test_metrics.py` — Metric calculations, confidence, benchmark (15 tests)
+- `tests/test_metrics.py` — Metric calculations, confidence, benchmark, per-period (22 tests)
 - `tests/test_regime.py` — Regime detection and breakdown (7 tests)
 - `tests/test_compare.py` — Strategy ranking and comparison (6 tests)
-- `tests/test_report.py` — Terminal, JSON, CSV output (15 tests)
+- `tests/test_report.py` — Terminal, JSON, CSV, period table output (20 tests)
 - `tests/test_backtest.py` — Backtest CLI + library (8 tests)
 - `tests/test_compare_cli.py` — Compare CLI + library (6 tests)
 - `tests/test_signal_store.py` — Signal persistence and annotation (15 tests)
@@ -148,10 +177,10 @@ Pre-commit hook: `.pre-commit-config.yaml` runs `pytest -m "not slow" -q` on eve
 | `thermaltrend/core/strategy.py` | Strategy ABC + `MACrossoverStrategy`, `DonchianBreakoutStrategy`, `RSIMeanReversionStrategy`, `ATRTrailingStopStrategy` |
 | `thermaltrend/core/engine.py` | `DataEngine` — main event loop connecting DataFeed → Strategy → Signals |
 | `thermaltrend/analytics/trade_simulator.py` | Converts SignalEvents into simulated Trades with ATR stops, $10K sizing |
-| `thermaltrend/analytics/metrics.py` | CAGR, Sharpe, Sortino, MaxDD, Calmar, win rate, confidence score |
+| `thermaltrend/analytics/metrics.py` | CAGR, Sharpe, Sortino, MaxDD, Calmar, win rate, confidence, per-period breakdown |
 | `thermaltrend/analytics/regime.py` | Market regime detection (BULL/BEAR/SIDEWAYS) + per-regime metrics |
 | `thermaltrend/analytics/compare.py` | Multi-strategy ranking with SPY buy-and-hold baseline |
-| `thermaltrend/analytics/report.py` | Terminal table + JSON + CSV export |
+| `thermaltrend/analytics/report.py` | Terminal table + JSON + CSV + period table export |
 | `thermaltrend/DESIGN.md` | Design document with all design decisions |
 | `thermaltrend/ARCHITECTURE.md` | Detailed architecture proposal for the full system (6 layers) |
 | `thermaltrend/data/equities/constituents.csv` | S&P 500 member list with `date_added` for universe filtering |

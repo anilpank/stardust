@@ -14,10 +14,11 @@ from pathlib import Path
 import pandas as pd
 
 from thermaltrend.analytics.compare import run_strategy_analysis
-from thermaltrend.analytics.metrics import compute_benchmark_metrics
+from thermaltrend.analytics.metrics import compute_benchmark_metrics, compute_period_metrics
 from thermaltrend.analytics.regime import classify_regime, compute_regime_metrics
 from thermaltrend.analytics.report import (
     format_per_ticker_table,
+    format_period_table,
     format_ranking_table,
     format_regime_table,
     export_json,
@@ -82,7 +83,7 @@ def run_backtest(
     return result
 
 
-def _print_summary(result: dict, show_per_ticker: bool, show_regime: bool) -> None:
+def _print_summary(result: dict, show_per_ticker: bool, show_regime: bool, show_period: str | None = None) -> None:
     """Print backtest results to terminal."""
     m = result["metrics"]
     name = result["strategy_name"]
@@ -114,6 +115,10 @@ def _print_summary(result: dict, show_per_ticker: bool, show_regime: bool) -> No
         regime_m = compute_regime_metrics(result["trades"], regimes)
         print(format_regime_table(regime_m, name))
 
+    if show_period:
+        period_m = compute_period_metrics(result["trades"], period=show_period)
+        print(format_period_table(period_m, name, period=show_period))
+
 
 def main():
     import argparse
@@ -133,6 +138,10 @@ def main():
     )
     parser.add_argument("--per-ticker", action="store_true", help="Show per-ticker breakdown")
     parser.add_argument("--regime", action="store_true", help="Show regime analysis")
+    parser.add_argument(
+        "--period", default=None, choices=["monthly", "quarterly", "yearly"],
+        help="Show per-period breakdown (monthly/quarterly/yearly)",
+    )
     parser.add_argument("--output", default=None, help="Export results to file (.json or .csv)")
     parser.add_argument(
         "--data-dir", default=DEFAULT_DATA_DIR,
@@ -155,7 +164,7 @@ def main():
         data_dir=args.data_dir,
     )
 
-    _print_summary(result, show_per_ticker=args.per_ticker, show_regime=args.regime)
+    _print_summary(result, show_per_ticker=args.per_ticker, show_regime=args.regime, show_period=args.period)
 
     if args.output:
         out = Path(args.output)
