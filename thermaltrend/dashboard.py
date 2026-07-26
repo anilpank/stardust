@@ -21,6 +21,8 @@ from thermaltrend.analytics.regime import classify_regime, compute_regime_metric
 from thermaltrend.charts import (
     drawdown_chart,
     equity_curve,
+    normalized_price_overlay,
+    ohlcv_chart,
     per_ticker_bar,
     period_heatmap,
     pnl_distribution,
@@ -225,8 +227,33 @@ def page_overview(result: dict):
     with col2:
         st.plotly_chart(drawdown_chart(equity), use_container_width=True)
 
+    signals = result.get("signals", [])
+    trades = result.get("trades", [])
+    tickers_in_result = sorted({t.ticker for t in trades}) if trades else []
+    if signals and tickers_in_result:
+        st.subheader("Price & Signals")
+        selected_signal_ticker = st.selectbox(
+            "Ticker", tickers_in_result, key="overview_signal_ticker",
+        )
+        try:
+            ticker_df = _load_ticker_data(selected_signal_ticker)
+            if not ticker_df.empty:
+                ticker_signals = [s for s in signals if s.ticker == selected_signal_ticker]
+                st.plotly_chart(
+                    price_with_signals(ticker_df, ticker_signals, title=f"{selected_signal_ticker} — Price & Signals"),
+                    use_container_width=True,
+                )
+        except Exception:
+            pass
+
     st.subheader("P&L Distribution")
-    st.plotly_chart(pnl_distribution(result["trades"]), use_container_width=True)
+    st.plotly_chart(pnl_distribution(trades), use_container_width=True)
+
+    if trades:
+        period_m = compute_period_metrics(trades, period="monthly")
+        if period_m:
+            st.subheader("Monthly Performance")
+            st.plotly_chart(period_heatmap(period_m), use_container_width=True)
 
 
 def page_trades(result: dict):
@@ -434,6 +461,130 @@ def page_saved_signals():
             _render_signal_table(df)
 
 
+DATE_PRESETS = {
+    "1M": 30, "3M": 90, "6M": 180, "1Y": 365,
+    "3Y": 3 * 365, "5Y": 5 * 365, "10Y": 10 * 365, "Max": None,
+}
+
+
+def _load_ticker_data(ticker: str) -> pd.DataFrame:
+    path = Path(DEFAULT_DATA_DIR) / f"{ticker}.parquet"
+    if not path.exists():
+        return pd.DataFrame()
+    df = pd.read_parquet(path)
+    df = df.dropna(subset=["Close"])
+    return df
+
+
+def _filter_by_preset(df: pd.DataFrame, preset: str) -> pd.DataFrame:
+    days = DATE_PRESETS.get(preset)
+    if days is None or df.empty:
+        return df
+    cutoff = df.index[-1] - pd.Timedelta(days=days)
+    return df[df.index >= cutoff]
+
+
+def page_data_explorer():
+    st.subheader("Data Explorer")
+
+    explorer_ticker = st.selectbox("Ticker", ALL_TICKERS, index=0, key="explorer_ticker")
+    preset = st.radio("Period", list(DATE_PRESETS.keys()), index=5, horizontal=True, key="explorer_preset")
+    use_custom = st.checkbox("Custom date range", key="explorer_custom")
+    if use_custom:
+        custom_start = st.date_input("Start", value=pd.Timestamp("2020-01-01").date(), key="explorer_start")
+        custom_end = st.date_input("End", value=pd.Timestamp.today().date(), key="explorer_end")
+
+    df = _load_ticker_data(explorer_ticker)
+    if df.empty:
+        st.error(f"No data found for {explorer_ticker}")
+        return
+
+    if use_custom:
+        df = df[(df.index >= pd.Timestamp(custom_start)) & (df.index <= pd.Timestamp(custom_end))]
+    else:
+        df = _filter_by_preset(df, preset)
+
+    if df.empty:
+        st.info("No data for the selected period")
+        return
+
+    last_close = df["Close"].iloc[-1]
+    high_52w = df["High"].iloc[-min(252, len(df)):].max()
+    low_52w = df["Low"].iloc[-min(252, len(df)):].min()
+    avg_vol = df["Volume"].iloc[-min(252, len(df)):].mean()
+    total_return = (df["Close"].iloc[-1] / df["Close"].iloc[0] - 1) * 100
+
+    c1, c2, c3, c4, c5 = st.columns(5)
+    c1.metric("Last Close", f"${last_close:,.2f}")
+    c2.metric("52W High", f"${high_52w:,.2f}")
+    c3.metric("52W Low", f"${low_52w:,.2f}")
+    c4.metric("Avg Volume", f"{avg_vol:,.0f}")
+    c5.metric("Total Return", f"{total_return:+.1f}%")
+
+    st.plotly_chart(ohlcv_chart(df, explorer_ticker), use_container_width=True)
+
+    with st.expander("Raw Data"):
+        display_df = df.copy()
+        display_df.index = display_df.index.strftime("%Y-%m-%d")
+        st.dataframe(display_df, use_container_width=True)
+
+
+def page_compare_tickers():
+    st.subheader("Compare Tickers")
+
+    compare_tickers = st.multiselect(
+        "Tickers to Compare", ALL_TICKERS,
+        default=["AAPL", "MSFT", "GOOGL"], key="compare_tickers",
+    )
+    cmp_preset = st.radio("Period", list(DATE_PRESETS.keys()), index=5, horizontal=True, key="cmp_preset")
+    cmp_custom = st.checkbox("Custom date range", key="cmp_custom")
+    if cmp_custom:
+        cmp_start = st.date_input("Start", value=pd.Timestamp("2020-01-01").date(), key="cmp_start")
+        cmp_end = st.date_input("End", value=pd.Timestamp.today().date(), key="cmp_end")
+
+    if not compare_tickers:
+        st.info("Select at least one ticker in the sidebar")
+        return
+
+    ticker_dfs = {}
+    for t in compare_tickers:
+        df = _load_ticker_data(t)
+        if not df.empty:
+            if cmp_custom:
+                df = df[(df.index >= pd.Timestamp(cmp_start)) & (df.index <= pd.Timestamp(cmp_end))]
+            else:
+                df = _filter_by_preset(df, cmp_preset)
+            if not df.empty:
+                ticker_dfs[t] = df
+
+    if not ticker_dfs:
+        st.info("No data for the selected tickers and period")
+        return
+
+    st.plotly_chart(normalized_price_overlay(ticker_dfs), use_container_width=True)
+
+    rows = []
+    for name, df in ticker_dfs.items():
+        total_ret = (df["Close"].iloc[-1] / df["Close"].iloc[0] - 1) * 100
+        daily_ret = df["Close"].pct_change().dropna()
+        volatility = daily_ret.std() * (252 ** 0.5) * 100 if len(daily_ret) > 1 else 0
+        years = len(df) / 252
+        cagr = ((df["Close"].iloc[-1] / df["Close"].iloc[0]) ** (1 / years) - 1) * 100 if years > 0 else 0
+        cummax = df["Close"].cummax()
+        max_dd = ((df["Close"] - cummax) / cummax).min() * 100
+        avg_vol = df["Volume"].mean()
+        rows.append({
+            "Ticker": name,
+            "Total Return": f"{total_ret:+.1f}%",
+            "CAGR": f"{cagr:+.1f}%",
+            "Volatility": f"{volatility:.1f}%",
+            "Max Drawdown": f"{max_dd:.1f}%",
+            "Avg Volume": f"{avg_vol:,.0f}",
+        })
+
+    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+
 def main():
     st.set_page_config(
         page_title="Thermaltrend Dashboard",
@@ -449,6 +600,12 @@ def main():
     </style>
     """, unsafe_allow_html=True)
 
+    strategy_name = "MA 50/200"
+    tickers = ["AAPL", "MSFT", "GOOGL"]
+    start = pd.Timestamp("2023-01-01").date()
+    end = pd.Timestamp("2026-07-01").date()
+    params = {}
+
     with st.sidebar:
         st.title("Thermaltrend")
         st.caption("Strategy Analysis Dashboard")
@@ -456,78 +613,82 @@ def main():
 
         tab_choice = st.radio(
             "Navigation",
-            ["Overview", "Trades", "Per-Ticker", "Regime", "Signals", "Compare", "Saved Runs"],
+            ["Overview", "Trades", "Per-Ticker", "Regime", "Signals", "Compare", "Saved Runs",
+             "Data Explorer", "Compare Tickers"],
             label_visibility="collapsed",
         )
 
         st.divider()
 
-        strategy_name = st.selectbox("Strategy", list(STRATEGY_REGISTRY.keys()), index=0)
-        st.caption(STRATEGY_DESCRIPTIONS[strategy_name])
+        if tab_choice in ("Data Explorer", "Compare Tickers"):
+            st.info("Use the controls on the main page to configure this view.")
+        else:
+            strategy_name = st.selectbox("Strategy", list(STRATEGY_REGISTRY.keys()), index=0)
+            st.caption(STRATEGY_DESCRIPTIONS[strategy_name])
 
-        tickers = st.multiselect(
-            "Tickers",
-            ALL_TICKERS,
-            default=["AAPL", "MSFT", "GOOGL"],
-        )
+            tickers = st.multiselect(
+                "Tickers",
+                ALL_TICKERS,
+                default=["AAPL", "MSFT", "GOOGL"],
+            )
 
-        col1, col2 = st.columns(2)
-        with col1:
-            start = st.date_input("Start", value=pd.Timestamp("2023-01-01").date())
-        with col2:
-            end = st.date_input("End", value=pd.Timestamp("2026-07-01").date())
+            col1, col2 = st.columns(2)
+            with col1:
+                start = st.date_input("Start", value=pd.Timestamp("2023-01-01").date())
+            with col2:
+                end = st.date_input("End", value=pd.Timestamp("2026-07-01").date())
 
-        st.divider()
+            st.divider()
 
-        with st.expander("Strategy Parameters", expanded=False):
-            params = {}
-            if strategy_name == "MA 50/200":
-                params["fast_period"] = st.number_input("Fast MA", 5, 200, 50)
-                params["slow_period"] = st.number_input("Slow MA", 20, 500, 200)
-            elif strategy_name == "Donchian 20/10":
-                params["entry_period"] = st.number_input("Entry Period", 5, 100, 20)
-                params["exit_period"] = st.number_input("Exit Period", 5, 50, 10)
-            elif strategy_name == "RSI 14":
-                params["period"] = st.number_input("RSI Period", 5, 50, 14)
-                params["oversold"] = st.number_input("Oversold", 10, 40, 30)
-                params["overbought"] = st.number_input("Overbought", 60, 90, 70)
-            elif strategy_name == "ATR Trail 20/14/3":
-                params["entry_period"] = st.number_input("Entry Period", 5, 100, 20)
-                params["atr_period"] = st.number_input("ATR Period", 5, 50, 14)
-                params["atr_multiple"] = st.number_input("ATR Multiple", 1.0, 5.0, 3.0, 0.5)
+            with st.expander("Strategy Parameters", expanded=False):
+                params = {}
+                if strategy_name == "MA 50/200":
+                    params["fast_period"] = st.number_input("Fast MA", 5, 200, 50)
+                    params["slow_period"] = st.number_input("Slow MA", 20, 500, 200)
+                elif strategy_name == "Donchian 20/10":
+                    params["entry_period"] = st.number_input("Entry Period", 5, 100, 20)
+                    params["exit_period"] = st.number_input("Exit Period", 5, 50, 10)
+                elif strategy_name == "RSI 14":
+                    params["period"] = st.number_input("RSI Period", 5, 50, 14)
+                    params["oversold"] = st.number_input("Oversold", 10, 40, 30)
+                    params["overbought"] = st.number_input("Overbought", 60, 90, 70)
+                elif strategy_name == "ATR Trail 20/14/3":
+                    params["entry_period"] = st.number_input("Entry Period", 5, 100, 20)
+                    params["atr_period"] = st.number_input("ATR Period", 5, 50, 14)
+                    params["atr_multiple"] = st.number_input("ATR Multiple", 1.0, 5.0, 3.0, 0.5)
 
-        run_backtest = tab_choice != "Compare" and tab_choice != "Saved Runs"
+            run_backtest = tab_choice not in ("Compare", "Saved Runs")
 
-        if run_backtest and st.button("Run Analysis", type="primary", use_container_width=True):
-            if not tickers:
-                st.sidebar.error("Select at least one ticker")
-                return
-
-            st.session_state["running"] = True
-            st.session_state["result"] = None
-
-            with st.spinner(f"Running {strategy_name} on {len(tickers)} tickers..."):
-                try:
-                    strategy_cls = STRATEGY_REGISTRY[strategy_name]
-                    strategy = strategy_cls(**(params if params else STRATEGY_DEFAULTS[strategy_name]))
-                    feed = DataFeed(DEFAULT_DATA_DIR, tickers=tickers,
-                                    start_date=str(start), end_date=str(end))
-
-                    if len(feed) == 0:
-                        st.error("No data found. Check your tickers and date range.")
-                        return
-
-                    engine = DataEngine(feed, strategy)
-                    signals = engine.run()
-
-                    from thermaltrend.analytics.compare import run_strategy_analysis
-                    result = run_strategy_analysis(signals, feed._data, strategy_name)
-                    st.session_state["result"] = result
-                    st.session_state["running"] = False
-                except Exception as e:
-                    st.error(f"Error: {e}")
-                    st.session_state["running"] = False
+            if run_backtest and st.button("Run Analysis", type="primary", use_container_width=True):
+                if not tickers:
+                    st.sidebar.error("Select at least one ticker")
                     return
+
+                st.session_state["running"] = True
+                st.session_state["result"] = None
+
+                with st.spinner(f"Running {strategy_name} on {len(tickers)} tickers..."):
+                    try:
+                        strategy_cls = STRATEGY_REGISTRY[strategy_name]
+                        strategy = strategy_cls(**(params if params else STRATEGY_DEFAULTS[strategy_name]))
+                        feed = DataFeed(DEFAULT_DATA_DIR, tickers=tickers,
+                                        start_date=str(start), end_date=str(end))
+
+                        if len(feed) == 0:
+                            st.error("No data found. Check your tickers and date range.")
+                            return
+
+                        engine = DataEngine(feed, strategy)
+                        signals = engine.run()
+
+                        from thermaltrend.analytics.compare import run_strategy_analysis
+                        result = run_strategy_analysis(signals, feed._data, strategy_name)
+                        st.session_state["result"] = result
+                        st.session_state["running"] = False
+                    except Exception as e:
+                        st.error(f"Error: {e}")
+                        st.session_state["running"] = False
+                        return
 
     if tab_choice == "Saved Runs":
         page_saved_signals()
@@ -541,6 +702,10 @@ def main():
             st.info("Select tickers in the sidebar to generate signals.")
         else:
             page_signals(strategy_name, tickers, str(start), str(end))
+    elif tab_choice == "Data Explorer":
+        page_data_explorer()
+    elif tab_choice == "Compare Tickers":
+        page_compare_tickers()
     else:
         result = st.session_state.get("result")
         if result is None:

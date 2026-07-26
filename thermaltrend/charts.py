@@ -27,6 +27,8 @@ COLORS = {
     "sideways": "#EECA3B",
 }
 
+OVERLAY_COLORS = ["#4C78A8", "#E45756", "#54A24B", "#EECA3B", "#B279A2", "#72B7B2", "#FF9DA6", "#9D755D"]
+
 LAYOUT_DEFAULTS = dict(
     template="plotly_dark",
     paper_bgcolor="rgba(0,0,0,0)",
@@ -219,6 +221,57 @@ def strategy_comparison_bar(ranking_df: pd.DataFrame, metric: str = "sharpe", ti
     fig.update_layout(xaxis_title="Strategy", showlegend=False, xaxis_tickangle=-15)
     label = title or f"Strategy Comparison: {metric.replace('_', ' ').title()}"
     return _apply_layout(fig, label, height=350)
+
+
+def ohlcv_chart(ticker_df: pd.DataFrame, ticker_name: str, title: str | None = None) -> go.Figure:
+    """Standalone candlestick + volume chart without signal markers."""
+    fig = make_subplots(
+        rows=2, cols=1, shared_xaxes=True,
+        row_heights=[0.7, 0.3], vertical_spacing=0.03,
+    )
+    fig.add_trace(go.Candlestick(
+        x=ticker_df.index, open=ticker_df["Open"], high=ticker_df["High"],
+        low=ticker_df["Low"], close=ticker_df["Close"],
+        increasing_line_color=COLORS["bull"], decreasing_line_color=COLORS["bear"],
+        name=ticker_name,
+    ), row=1, col=1)
+
+    vol_colors = [
+        COLORS["bull"] if c >= o else COLORS["bear"]
+        for c, o in zip(ticker_df["Close"], ticker_df["Open"])
+    ]
+    fig.add_trace(go.Bar(
+        x=ticker_df.index, y=ticker_df["Volume"],
+        name="Volume", marker_color=vol_colors, opacity=0.4,
+    ), row=2, col=1)
+
+    fig.update_layout(xaxis_rangeslider_visible=False)
+    fig.update_yaxes(title_text="Price ($)", row=1, col=1)
+    fig.update_yaxes(title_text="Volume", row=2, col=1)
+    label = title or f"{ticker_name} Price"
+    return _apply_layout(fig, label, height=500)
+
+
+def normalized_price_overlay(
+    ticker_dfs: dict[str, pd.DataFrame], title: str = "Normalized Price Comparison"
+) -> go.Figure:
+    """Overlay multiple tickers rebased to 100 at start date for visual comparison."""
+    fig = go.Figure()
+    for i, (name, df) in enumerate(ticker_dfs.items()):
+        if df.empty or "Close" not in df.columns:
+            continue
+        base = df["Close"].iloc[0]
+        if base == 0:
+            continue
+        normalized = df["Close"] / base * 100
+        fig.add_trace(go.Scatter(
+            x=normalized.index, y=normalized.values,
+            mode="lines", name=name,
+            line=dict(color=OVERLAY_COLORS[i % len(OVERLAY_COLORS)], width=2),
+        ))
+
+    fig.update_layout(yaxis_title="Normalized Price (start = 100)")
+    return _apply_layout(fig, title)
 
 
 def period_heatmap(period_metrics: dict[str, dict], title: str = "Monthly P&L Heatmap") -> go.Figure:

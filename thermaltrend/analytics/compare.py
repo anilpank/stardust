@@ -90,7 +90,7 @@ def run_strategy_analysis(
         simulator: Optional custom TradeSimulator.
 
     Returns:
-        Dict with trades, equity_curve, per_ticker, metrics, confidence.
+        Dict with trades, signals, equity_curve, per_ticker, metrics, confidence.
     """
     if simulator is None:
         simulator = TradeSimulator()
@@ -110,6 +110,7 @@ def run_strategy_analysis(
     return {
         "strategy_name": strategy_name,
         "trades": trades,
+        "signals": signals,
         "equity_curve": equity_curve,
         "per_ticker": per_ticker,
         "metrics": metrics,

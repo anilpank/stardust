@@ -14,6 +14,8 @@ from thermaltrend.charts import (
     _apply_layout,
     drawdown_chart,
     equity_curve,
+    normalized_price_overlay,
+    ohlcv_chart,
     per_ticker_bar,
     period_heatmap,
     pnl_distribution,
@@ -297,3 +299,93 @@ class TestColors:
         for name, color in COLORS.items():
             assert color.startswith("#"), f"{name} is not a hex color"
             assert len(color) == 7, f"{name} hex color has wrong length"
+
+
+class TestOhlcvChart:
+    def _make_ticker_df(self, dates):
+        n = len(dates)
+        return pd.DataFrame({
+            "Open": [100 + i for i in range(n)],
+            "High": [101 + i for i in range(n)],
+            "Low": [99 + i for i in range(n)],
+            "Close": [100 + i for i in range(n)],
+            "Volume": [1_000_000] * n,
+        }, index=dates)
+
+    def test_returns_figure_with_candlestick_and_volume(self):
+        dates = pd.bdate_range("2026-01-01", periods=10)
+        df = self._make_ticker_df(dates)
+        fig = ohlcv_chart(df, "TEST")
+        assert isinstance(fig, go.Figure)
+        trace_types = [t.type for t in fig.data]
+        assert "candlestick" in trace_types
+        assert "bar" in trace_types
+
+    def test_title_includes_ticker_name(self):
+        dates = pd.bdate_range("2026-01-01", periods=5)
+        df = self._make_ticker_df(dates)
+        fig = ohlcv_chart(df, "AAPL")
+        assert "AAPL" in fig.layout.title.text
+
+    def test_custom_title(self):
+        dates = pd.bdate_range("2026-01-01", periods=5)
+        df = self._make_ticker_df(dates)
+        fig = ohlcv_chart(df, "MSFT", title="Custom Title")
+        assert fig.layout.title.text == "Custom Title"
+
+    def test_height_is_500(self):
+        dates = pd.bdate_range("2026-01-01", periods=5)
+        df = self._make_ticker_df(dates)
+        fig = ohlcv_chart(df, "TEST")
+        assert fig.layout.height == 500
+
+
+class TestNormalizedPriceOverlay:
+    def _make_ticker_df(self, dates, base_price=100):
+        n = len(dates)
+        return pd.DataFrame({
+            "Open": [base_price + i for i in range(n)],
+            "High": [base_price + i + 1 for i in range(n)],
+            "Low": [base_price + i - 1 for i in range(n)],
+            "Close": [base_price + i for i in range(n)],
+            "Volume": [1_000_000] * n,
+        }, index=dates)
+
+    def test_returns_figure(self):
+        dates = pd.bdate_range("2026-01-01", periods=10)
+        dfs = {"AAPL": self._make_ticker_df(dates, 100), "MSFT": self._make_ticker_df(dates, 200)}
+        fig = normalized_price_overlay(dfs)
+        assert isinstance(fig, go.Figure)
+
+    def test_all_start_at_100(self):
+        dates = pd.bdate_range("2026-01-01", periods=10)
+        dfs = {"AAPL": self._make_ticker_df(dates, 100), "MSFT": self._make_ticker_df(dates, 200)}
+        fig = normalized_price_overlay(dfs)
+        for trace in fig.data:
+            assert trace.y[0] == 100.0
+
+    def test_one_ticker(self):
+        dates = pd.bdate_range("2026-01-01", periods=5)
+        dfs = {"AAPL": self._make_ticker_df(dates)}
+        fig = normalized_price_overlay(dfs)
+        assert len(fig.data) == 1
+
+    def test_empty_df_skipped(self):
+        dates = pd.bdate_range("2026-01-01", periods=5)
+        dfs = {"AAPL": self._make_ticker_df(dates), "EMPTY": pd.DataFrame()}
+        fig = normalized_price_overlay(dfs)
+        assert len(fig.data) == 1
+
+    def test_legend_names_match_tickers(self):
+        dates = pd.bdate_range("2026-01-01", periods=5)
+        dfs = {"AAPL": self._make_ticker_df(dates), "MSFT": self._make_ticker_df(dates)}
+        fig = normalized_price_overlay(dfs)
+        names = [t.name for t in fig.data]
+        assert "AAPL" in names
+        assert "MSFT" in names
+
+    def test_default_title(self):
+        dates = pd.bdate_range("2026-01-01", periods=5)
+        dfs = {"A": self._make_ticker_df(dates)}
+        fig = normalized_price_overlay(dfs)
+        assert "Normalized" in fig.layout.title.text
