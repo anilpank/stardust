@@ -222,3 +222,79 @@ class TestBacktestIntegration:
             assert isinstance(m["sharpe"], float), f"{name}: sharpe not float"
             assert isinstance(m["total_trades"], int), f"{name}: total_trades not int"
             assert 0.0 <= result["confidence"] <= 1.0, f"{name}: confidence out of range"
+
+
+class TestDatePresets:
+    def test_date_presets_defined(self):
+        from thermaltrend.dashboard import DATE_PRESETS
+        expected_keys = {"1M", "3M", "6M", "1Y", "3Y", "5Y", "10Y", "Max"}
+        assert set(DATE_PRESETS.keys()) == expected_keys
+
+    def test_max_is_none(self):
+        from thermaltrend.dashboard import DATE_PRESETS
+        assert DATE_PRESETS["Max"] is None
+
+    def test_presets_are_positive_integers(self):
+        from thermaltrend.dashboard import DATE_PRESETS
+        for key, val in DATE_PRESETS.items():
+            if val is not None:
+                assert isinstance(val, int) and val > 0, f"{key} has invalid value {val}"
+
+
+class TestLoadTickerData:
+    def test_loads_existing_ticker(self):
+        from thermaltrend.dashboard import _load_ticker_data, DEFAULT_DATA_DIR
+        import os
+        tickers = [f.stem for f in Path(DEFAULT_DATA_DIR).glob("*.parquet") if f.stem != "SPY"]
+        if tickers:
+            df = _load_ticker_data(tickers[0])
+            assert not df.empty
+            assert "Close" in df.columns
+
+    def test_missing_ticker_returns_empty(self):
+        from thermaltrend.dashboard import _load_ticker_data
+        df = _load_ticker_data("NONEXISTENT_TICKER_XYZ")
+        assert df.empty
+
+
+class TestFilterByPreset:
+    def test_max_returns_full_data(self):
+        from thermaltrend.dashboard import _filter_by_preset
+        dates = pd.bdate_range("2020-01-01", periods=1000)
+        df = pd.DataFrame({"Close": range(1000)}, index=dates)
+        result = _filter_by_preset(df, "Max")
+        assert len(result) == 1000
+
+    def test_1m_returns_approx_30_rows(self):
+        from thermaltrend.dashboard import _filter_by_preset
+        dates = pd.bdate_range("2025-01-01", periods=500)
+        df = pd.DataFrame({"Close": range(500)}, index=dates)
+        result = _filter_by_preset(df, "1M")
+        assert len(result) <= 35
+        assert len(result) >= 15
+
+    def test_empty_df_returns_empty(self):
+        from thermaltrend.dashboard import _filter_by_preset
+        df = pd.DataFrame()
+        result = _filter_by_preset(df, "1Y")
+        assert result.empty
+
+
+class TestRunStrategyAnalysisSignals:
+    """Verify that run_strategy_analysis now includes signals in the result dict."""
+
+    def test_result_contains_signals(self, tmp_path):
+        dates = pd.bdate_range("2026-01-01", periods=60)
+        closes = [100 + i * (0.5 if i % 8 < 4 else -0.3) for i in range(60)]
+        _make_parquet(tmp_path, "TEST", list(zip(dates, closes)))
+
+        feed = DataFeed(str(tmp_path), tickers=["TEST"], start_date="2026-01-01")
+        strategy = DonchianBreakoutStrategy(entry_period=10, exit_period=5)
+        engine = DataEngine(feed, strategy)
+        signals = engine.run()
+
+        result = run_strategy_analysis(signals, feed._data, "Donchian")
+
+        assert "signals" in result
+        assert isinstance(result["signals"], list)
+        assert len(result["signals"]) == len(signals)
