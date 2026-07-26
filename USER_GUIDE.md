@@ -29,6 +29,8 @@ Thermaltrend helps you answer three questions:
 2. **Which strategy works best right now?** — Compare strategies side-by-side and see which one has the best risk-adjusted returns.
 3. **What should I trade today?** — Generate ranked buy/sell signals based on validated strategies.
 
+Plus, explore 50+ years of stock price data with interactive charts, compare any stocks visually, and drill down on price action — all from your browser.
+
 The 4 built-in strategies are:
 
 | Strategy | What It Does | Best In |
@@ -425,14 +427,20 @@ The dashboard has a **sidebar** on the left (for your settings) and a **main are
 
 ### Sidebar: Your Controls
 
+The sidebar adapts based on which tab you're on.
+
+**For strategy tabs** (Overview, Trades, Per-Ticker, Regime, Signals, Compare, Saved Runs):
+
 | Control | What It Does |
 |---------|-------------|
-| **Navigation** | Switch between tabs (Overview, Trades, Per-Ticker, etc.) |
+| **Navigation** | Switch between tabs |
 | **Strategy** | Pick which strategy to run. A plain-English description appears below. |
 | **Tickers** | Pick which stocks to analyze. Start typing to search (e.g., type "AAPL"). |
 | **Start / End** | Set the date range for your backtest. |
 | **Strategy Parameters** | Expand this to tweak strategy settings (e.g., change the RSI threshold). |
 | **Run Analysis** | Click this button to run the backtest. Results appear in the main area. |
+
+**For standalone tabs** (Data Explorer, Compare Tickers): The sidebar shows a tip to use the controls on the main page. All configuration is on the main page itself.
 
 ### Tab: Overview
 
@@ -459,6 +467,10 @@ This is your first stop after clicking "Run Analysis."
 **Drawdown Chart** — Shows how far the portfolio dropped from its peak at each point in time. Deeper valleys = riskier.
 
 **P&L Distribution** — A bar chart of each trade's profit or loss. Green bars = winners, red bars = losers.
+
+**Price & Signals** — A candlestick chart for each ticker showing price action with BUY (green triangle up) and SELL (red triangle down) markers. Use the ticker dropdown to switch between stocks in your backtest. This helps you see exactly where the strategy entered and exited positions.
+
+**Monthly Performance** — A bar chart showing total P&L broken down by month. Green bars = profitable months, red bars = losing months. Quickly identify which periods were strong or weak.
 
 ### Tab: Trades
 
@@ -506,6 +518,37 @@ Run all 4 strategies on your selected stocks and rank them.
 
 Browse signal runs you've saved (from the Signals tab or the command line). Select a run to view its signals.
 
+### Tab: Data Explorer
+
+View any stock's full price history with interactive charts — no backtest required.
+
+1. Select a **Ticker** from the dropdown (all 500+ S&P 500 stocks available)
+2. Choose a **Period** — quick presets (1M, 3M, 6M, 1Y, 3Y, 5Y, 10Y, Max) or check **Custom date range** for specific dates
+3. You'll see:
+   - **Summary metrics** — Last Close, 52-Week High/Low, Average Volume, Total Return
+   - **Interactive candlestick chart** — zoom, pan, hover for details. Volume bars shown below the price.
+   - **Raw Data** — expand the accordion at the bottom to see the full OHLCV data table
+
+**Use cases:**
+- Check the current price and recent performance of any stock
+- Visually inspect price action before running a backtest
+- Look at long-term historical trends (data goes back to 1970 for most stocks)
+
+### Tab: Compare Tickers
+
+Compare multiple stocks side-by-side with normalized price charts — no backtest required.
+
+1. Select **Tickers to Compare** (start typing to search, e.g., "AAPL")
+2. Choose a **Period** (same presets as Data Explorer, or custom dates)
+3. You'll see:
+   - **Normalized Price Chart** — All stocks start at 100, so you can visually compare relative performance. If AAPL ends at 150 and MSFT at 120, AAPL outperformed by 30%.
+   - **Performance Metrics Table** — Total Return, CAGR, Volatility, Max Drawdown, and Average Volume for each ticker
+
+**Use cases:**
+- Compare how two or more stocks have performed over the same period
+- Decide which stock to allocate more capital to
+- Spot correlations — do these stocks move together or diverge?
+
 ### Daily Workflow with the Dashboard
 
 1. **Open the dashboard** (`streamlit run thermaltrend/dashboard.py`)
@@ -514,6 +557,13 @@ Browse signal runs you've saved (from the Signals tab or the command line). Sele
 4. **Click Generate Signals** — see what to trade today
 5. **Click Save Signals to Store** — keep a record
 6. **Act on strong BUY signals** via your broker
+
+### Quick Research Workflow (no backtest needed)
+
+1. **Open the dashboard** (`streamlit run thermaltrend/dashboard.py`)
+2. **Go to Data Explorer** — pick a ticker and period to see its price history
+3. **Go to Compare Tickers** — select multiple stocks to compare their performance visually
+4. **Switch to strategy tabs** when you're ready to backtest
 
 ### Customizing the Dashboard
 
@@ -532,6 +582,8 @@ python thermaltrend/signals.py --strategy ma_crossover --tickers AAPL MSFT --min
 
 # === DASHBOARD ===
 streamlit run thermaltrend/dashboard.py                            # Open visual dashboard in browser
+# Tabs: Overview | Trades | Per-Ticker | Regime | Signals | Compare | Saved Runs | Data Explorer | Compare Tickers
+# Data Explorer & Compare Tickers work standalone — no backtest needed
 
 # === BACKTEST ===
 python thermaltrend/backtest.py --strategy ma_crossover --ticker AAPL --start 2024-01-01       # Basic backtest
