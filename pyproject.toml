@@ -1,3 +1,11 @@
+[project]
+name = "thermaltrend"
+requires-python = ">=3.12"
+dependencies = [
+    "streamlit>=1.38.0",
+    "plotly>=5.18.0",
+]
+
 [tool.pytest.ini_options]
 markers = [
     "slow: marks tests that hit external APIs (deselect with '-m \"not slow\"')"
