@@ -8,7 +8,9 @@ import pandas as pd
 import pytest
 
 from thermaltrend.analytics.report import (
+    format_cross_strategy_period_table,
     format_per_ticker_table,
+    format_period_table,
     format_ranking_table,
     format_regime_table,
     format_signals_table,
@@ -171,3 +173,72 @@ class TestExportTradesCsv:
             path = Path(tmpdir) / "trades.csv"
             export_trades_csv([], path)
             assert not path.exists()
+
+
+class TestFormatPeriodTable:
+    def test_basic(self):
+        period_metrics = {
+            "2026-01": {
+                "total_trades": 10,
+                "trades_completed": 8,
+                "win_rate": 0.625,
+                "profit_factor": 1.8,
+                "avg_trade_pnl": 75.0,
+                "total_pnl": 600.0,
+                "avg_holding_days": 5.0,
+            },
+            "2026-02": {
+                "total_trades": 5,
+                "trades_completed": 5,
+                "win_rate": 0.4,
+                "profit_factor": 1.1,
+                "avg_trade_pnl": -20.0,
+                "total_pnl": -100.0,
+                "avg_holding_days": 3.0,
+            },
+        }
+        table = format_period_table(period_metrics, "my_strategy", "monthly")
+        assert "2026-01" in table
+        assert "2026-02" in table
+        assert "my_strategy" in table
+        assert "Monthly" in table
+        assert "TOTAL" in table
+
+    def test_empty(self):
+        table = format_period_table({}, "test", "monthly")
+        assert "No period data" in table
+
+    def test_yearly(self):
+        period_metrics = {
+            "2025": {"total_trades": 20, "trades_completed": 18, "win_rate": 0.6, "total_pnl": 2000.0},
+            "2026": {"total_trades": 10, "trades_completed": 10, "win_rate": 0.5, "total_pnl": -500.0},
+        }
+        table = format_period_table(period_metrics, "test", "yearly")
+        assert "Yearly" in table
+        assert "2025" in table
+        assert "2026" in table
+
+
+class TestFormatCrossStrategyPeriodTable:
+    def test_basic(self):
+        strategy_results = {
+            "MA 50/200": {
+                "trades": [
+                    _make_trade(pnl=500.0, pnl_pct=0.05),
+                ],
+            },
+            "Donchian": {
+                "trades": [
+                    _make_trade(pnl=800.0, pnl_pct=0.08),
+                ],
+            },
+        }
+        table = format_cross_strategy_period_table(strategy_results, "monthly")
+        assert "MA 50/200" in table
+        assert "Donchian" in table
+        assert "TOTAL" in table
+        assert "*" in table
+
+    def test_empty(self):
+        table = format_cross_strategy_period_table({}, "monthly")
+        assert "No strategy results" in table

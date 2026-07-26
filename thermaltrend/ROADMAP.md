@@ -20,10 +20,11 @@ Working pipeline: **DataFeed → DataEngine → Strategy → SignalEvents → Tr
 | Backtest CLI (`backtest.py`) | Built |
 | Compare CLI (`compare_cli.py`) | Built |
 | Signal Persistence (`signal_store.py`) | Built |
+| Per-Period Breakdown (monthly/quarterly/yearly) | Built |
 | Portfolio & Risk | Not built |
 | Execution Handler | Not built |
 
-Source: ~2,800 lines across 17 modules. Tests: ~3,400 lines across 21 files (223 unit tests).
+Source: ~3,000 lines across 17 modules. Tests: ~3,600 lines across 21 files (235 unit tests).
 
 ---
 
@@ -160,6 +161,7 @@ thermaltrend/
 Phase 2 (done)      →  analytics/metrics.py + report.py + trade_simulator.py + regime.py + compare.py
 Phase 2 cont (done) →  signal_store.py + backtest.py + compare_cli.py (persistence + CLI tools)
 Phase 3 (partial)   →  4 of 6 strategies built; dual momentum, factor scorer next
+Phase 3a (done)     →  per-period breakdown (monthly/quarterly/yearly) in metrics + report + CLI
 Phase 4 (next)      →  portfolio/ package (position sizing, PnL)
 Phase 5 (later)     →  execution/ (OrderEvent, FillEvent, simulated fills)
 Phase 6 (future)    →  live broker bridge

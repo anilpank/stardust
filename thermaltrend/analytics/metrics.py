@@ -198,6 +198,73 @@ def compute_per_ticker_metrics(trades: list[Trade]) -> dict[str, dict]:
     return results
 
 
+def compute_period_metrics(
+    trades: list[Trade], period: str = "monthly"
+) -> dict[str, dict]:
+    """Compute metrics broken down by time period.
+
+    Groups trades by their entry date into monthly, quarterly, or yearly buckets.
+
+    Args:
+        trades: List of Trade objects.
+        period: One of "monthly", "quarterly", "yearly".
+
+    Returns:
+        Dict mapping period_label -> metrics dict, sorted chronologically.
+    """
+    if period not in ("monthly", "quarterly", "yearly"):
+        raise ValueError(f"period must be 'monthly', 'quarterly', or 'yearly', got '{period}'")
+
+    period_trades: dict[str, list[Trade]] = {}
+    for trade in trades:
+        dt = pd.Timestamp(trade.entry_date)
+        if period == "yearly":
+            key = f"{dt.year}"
+        elif period == "quarterly":
+            q = (dt.month - 1) // 3 + 1
+            key = f"{dt.year}-Q{q}"
+        else:
+            key = f"{dt.year}-{dt.month:02d}"
+        period_trades.setdefault(key, []).append(trade)
+
+    results = {}
+    for label in sorted(period_trades.keys()):
+        p_trades = period_trades[label]
+        completed = [t for t in p_trades if t.exit_reason != "data_end"]
+        if not completed:
+            results[label] = {
+                "total_trades": len(p_trades),
+                "status": "no_completed_trades",
+            }
+            continue
+
+        returns = np.array([t.pnl_pct for t in completed])
+        pnls = np.array([t.pnl for t in completed])
+        wins = returns[returns > 0]
+        losses = returns[returns < 0]
+
+        win_rate = len(wins) / len(completed)
+        gross_profit = float(wins.sum()) if len(wins) > 0 else 0.0
+        gross_loss = float(abs(losses.sum())) if len(losses) > 0 else 0.0
+        profit_factor = gross_profit / gross_loss if gross_loss > 0 else None
+
+        avg_days = float(np.mean([t.holding_days for t in completed]))
+
+        results[label] = {
+            "total_trades": len(p_trades),
+            "trades_completed": len(completed),
+            "win_rate": round(win_rate, 4),
+            "profit_factor": round(profit_factor, 4) if profit_factor is not None else None,
+            "avg_trade_pnl": round(float(pnls.mean()), 2),
+            "total_pnl": round(float(pnls.sum()), 2),
+            "avg_holding_days": round(avg_days, 1),
+            "avg_win": round(float(wins.mean()), 4) if len(wins) > 0 else 0.0,
+            "avg_loss": round(float(losses.mean()), 4) if len(losses) > 0 else 0.0,
+        }
+
+    return results
+
+
 def compute_confidence(
     trades: list[Trade], min_trades: int = 30, min_tickers: int = 5
 ) -> float:

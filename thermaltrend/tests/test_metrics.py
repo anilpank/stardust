@@ -12,6 +12,7 @@ from thermaltrend.analytics.metrics import (
     compute_benchmark_metrics,
     compute_confidence,
     compute_equity_curve,
+    compute_period_metrics,
     compute_per_ticker_metrics,
 )
 from thermaltrend.core.events import SignalDirection
@@ -212,3 +213,122 @@ class TestComputeBenchmarkMetrics:
         spy_data = pd.DataFrame(columns=["Open", "Close"])
         result = compute_benchmark_metrics(spy_data, "2020-01-01", "2021-01-01")
         assert result["cagr"] == 0.0
+
+
+class TestComputePeriodMetrics:
+    def test_empty(self):
+        result = compute_period_metrics([])
+        assert result == {}
+
+    def test_monthly_grouping(self):
+        trades = [
+            _make_trade(
+                ticker="AAPL",
+                entry_date=datetime(2026, 1, 5),
+                exit_date=datetime(2026, 1, 15),
+                exit_price=110.0,
+                pnl=500.0,
+                pnl_pct=0.10,
+            ),
+            _make_trade(
+                ticker="AAPL",
+                entry_date=datetime(2026, 1, 20),
+                exit_date=datetime(2026, 1, 30),
+                exit_price=95.0,
+                pnl=-200.0,
+                pnl_pct=-0.05,
+            ),
+            _make_trade(
+                ticker="AAPL",
+                entry_date=datetime(2026, 2, 5),
+                exit_date=datetime(2026, 2, 15),
+                exit_price=115.0,
+                pnl=700.0,
+                pnl_pct=0.07,
+            ),
+        ]
+        result = compute_period_metrics(trades, period="monthly")
+        assert "2026-01" in result
+        assert "2026-02" in result
+        assert result["2026-01"]["total_trades"] == 2
+        assert result["2026-01"]["win_rate"] == 0.5
+        assert result["2026-02"]["total_trades"] == 1
+        assert result["2026-02"]["win_rate"] == 1.0
+
+    def test_yearly_grouping(self):
+        trades = [
+            _make_trade(
+                ticker="AAPL",
+                entry_date=datetime(2025, 6, 1),
+                exit_date=datetime(2025, 6, 15),
+                exit_price=110.0,
+            ),
+            _make_trade(
+                ticker="AAPL",
+                entry_date=datetime(2026, 3, 1),
+                exit_date=datetime(2026, 3, 15),
+                exit_price=110.0,
+            ),
+        ]
+        result = compute_period_metrics(trades, period="yearly")
+        assert "2025" in result
+        assert "2026" in result
+        assert result["2025"]["total_trades"] == 1
+        assert result["2026"]["total_trades"] == 1
+
+    def test_quarterly_grouping(self):
+        trades = [
+            _make_trade(
+                ticker="AAPL",
+                entry_date=datetime(2026, 1, 15),
+                exit_date=datetime(2026, 1, 25),
+                exit_price=110.0,
+            ),
+            _make_trade(
+                ticker="AAPL",
+                entry_date=datetime(2026, 4, 15),
+                exit_date=datetime(2026, 4, 25),
+                exit_price=110.0,
+            ),
+            _make_trade(
+                ticker="AAPL",
+                entry_date=datetime(2026, 10, 15),
+                exit_date=datetime(2026, 10, 25),
+                exit_price=110.0,
+            ),
+        ]
+        result = compute_period_metrics(trades, period="quarterly")
+        assert "2026-Q1" in result
+        assert "2026-Q2" in result
+        assert "2026-Q4" in result
+        assert result["2026-Q1"]["total_trades"] == 1
+
+    def test_invalid_period(self):
+        with pytest.raises(ValueError, match="period must be"):
+            compute_period_metrics([], period="weekly")
+
+    def test_period_with_only_open_trades(self):
+        trades = [_make_trade(ticker="AAPL", exit_reason="data_end")]
+        result = compute_period_metrics(trades, period="monthly")
+        key = "2026-01"
+        assert key in result
+        assert result[key]["status"] == "no_completed_trades"
+
+    def test_chronological_order(self):
+        trades = [
+            _make_trade(
+                ticker="AAPL",
+                entry_date=datetime(2026, 3, 1),
+                exit_date=datetime(2026, 3, 10),
+                exit_price=110.0,
+            ),
+            _make_trade(
+                ticker="AAPL",
+                entry_date=datetime(2026, 1, 5),
+                exit_date=datetime(2026, 1, 15),
+                exit_price=110.0,
+            ),
+        ]
+        result = compute_period_metrics(trades, period="monthly")
+        keys = list(result.keys())
+        assert keys == sorted(keys)
