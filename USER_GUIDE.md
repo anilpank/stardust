@@ -17,6 +17,7 @@ This guide walks you through setting up and using Thermaltrend — a system that
 7. [Understanding the Output](#7-understanding-the-output)
 8. [Common Workflows](#8-common-workflows)
 9. [Troubleshooting](#9-troubleshooting)
+10. [Visual Dashboard](#10-visual-dashboard)
 
 ---
 
@@ -64,7 +65,7 @@ cd /path/to/stardust
 ### Step 3: Install Dependencies
 
 ```bash
-pip install pandas numpy yfinance requests pyarrow pytest
+pip install pandas numpy yfinance requests pyarrow pytest streamlit plotly
 ```
 
 You should see "Successfully installed..." messages. If you see errors, make sure Python 3.12+ is installed (`python --version`).
@@ -392,6 +393,134 @@ Then open `results.txt` in any text editor.
 4. Look at the **Win Rate** — above 55% is good
 5. If a strategy has low Confidence, it means there aren't enough trades to trust the results — try a longer date range or more tickers
 
+### Dashboard won't open / shows a blank page
+
+- Make sure you installed the dashboard dependencies: `pip install streamlit plotly`
+- Try refreshing the browser page
+- Check that port 8501 isn't in use by another program
+
+### Dashboard shows "No data found"
+
+- Run `python thermaltrend/update_data.py` to make sure your data is current
+- Check that your tickers are selected in the sidebar
+
+---
+
+## 10. Visual Dashboard
+
+The dashboard gives you everything from Sections 4-6 in a visual, point-and-click interface — no terminal commands needed. Charts, metric cards, and strategy comparisons all in your browser.
+
+### Launch the Dashboard
+
+```bash
+cd /path/to/stardust
+streamlit run thermaltrend/dashboard.py
+```
+
+A browser tab opens automatically at `http://localhost:8501`. If it doesn't, open that URL manually.
+
+### What You'll See
+
+The dashboard has a **sidebar** on the left (for your settings) and a **main area** on the right (for results). The sidebar stays constant; the main area changes based on which tab you select.
+
+### Sidebar: Your Controls
+
+| Control | What It Does |
+|---------|-------------|
+| **Navigation** | Switch between tabs (Overview, Trades, Per-Ticker, etc.) |
+| **Strategy** | Pick which strategy to run. A plain-English description appears below. |
+| **Tickers** | Pick which stocks to analyze. Start typing to search (e.g., type "AAPL"). |
+| **Start / End** | Set the date range for your backtest. |
+| **Strategy Parameters** | Expand this to tweak strategy settings (e.g., change the RSI threshold). |
+| **Run Analysis** | Click this button to run the backtest. Results appear in the main area. |
+
+### Tab: Overview
+
+This is your first stop after clicking "Run Analysis."
+
+**Plain-English Summary** — A color-coded sentence at the top tells you in human terms how the strategy performed:
+> "MA 50/200 delivered +5.4% annual return with a decent risk-adjusted profile (Sharpe 0.37). It wins more often than it loses (60% win rate), with moderate downside risk (-12.3% worst drawdown)."
+
+**Metric Cards** — Eight key numbers at a glance:
+
+| Card | What It Means |
+|------|-------------|
+| Annual Return (CAGR) | How much the strategy grew per year |
+| Sharpe Ratio | Risk-adjusted return (higher = better) |
+| Max Drawdown | Worst peak-to-trough loss |
+| Win Rate | % of trades that were profitable |
+| Profit Factor | Profit per dollar of loss |
+| Avg Trade P&L | Average dollar gain/loss per trade |
+| Total Trades | How many trades were made |
+| Confidence | Statistical reliability (0-100%) |
+
+**Equity Curve** — A line chart showing your portfolio value over time. If you included SPY as a benchmark, it appears as a dotted line for comparison.
+
+**Drawdown Chart** — Shows how far the portfolio dropped from its peak at each point in time. Deeper valleys = riskier.
+
+**P&L Distribution** — A bar chart of each trade's profit or loss. Green bars = winners, red bars = losers.
+
+### Tab: Trades
+
+A full table of every completed trade with entry/exit dates, prices, P&L, and how long the position was held. Sort by any column by clicking the header.
+
+### Tab: Per-Ticker
+
+Two bar charts side by side:
+- **Total P&L by ticker** — Which stocks made the most money (or lost the most)
+- **Win Rate by ticker** — Which stocks the strategy is most accurate on
+
+Use this to identify which stocks the strategy works best on.
+
+### Tab: Regime
+
+Shows how the strategy performed in different market conditions:
+- **BULL** — Market was trending up
+- **BEAR** — Market was trending down
+- **SIDEWAYS** — Market was flat
+
+A table and bar chart break down trades, win rate, and P&L by regime. If a strategy only works in bull markets, you'll see it here.
+
+### Tab: Signals
+
+Generate and save trading signals without leaving the browser.
+
+1. Adjust the **minimum signal strength** slider (0 = all signals, 1 = only strongest)
+2. Choose a **direction filter** (All, BUY, or SELL)
+3. Click **Generate Signals**
+4. Review the signal table (BUY signals in green, SELL in red)
+5. Click **Save Signals to Store** to persist them for later review
+
+### Tab: Compare
+
+Run all 4 strategies on your selected stocks and rank them.
+
+1. Choose a metric to **Rank by** (Sharpe is the default — it's the best single measure of strategy quality)
+2. Click **Run Comparison**
+3. A ranking table appears with the S&P 500 buy-and-hold as a benchmark row
+4. Bar charts show side-by-side comparisons for Sharpe, CAGR, and Max Drawdown
+
+**How to read the table:** The strategy at the top is the winner for your chosen metric. Strategies must beat the S&P 500 benchmark row to be worth using.
+
+### Tab: Saved Runs
+
+Browse signal runs you've saved (from the Signals tab or the command line). Select a run to view its signals.
+
+### Daily Workflow with the Dashboard
+
+1. **Open the dashboard** (`streamlit run thermaltrend/dashboard.py`)
+2. **Update data** in a terminal: `python thermaltrend/update_data.py`
+3. **Go to the Signals tab** in the dashboard
+4. **Click Generate Signals** — see what to trade today
+5. **Click Save Signals to Store** — keep a record
+6. **Act on strong BUY signals** via your broker
+
+### Customizing the Dashboard
+
+The dashboard looks for your stock data in `thermaltrend/data/equities/`. If you moved it, update the `DEFAULT_DATA_DIR` variable at the top of `thermaltrend/dashboard.py`.
+
+To change the look and feel, edit `.streamlit/config.toml` — it controls colors and fonts.
+
 ---
 
 ## Quick Reference Card
@@ -400,6 +529,9 @@ Then open `results.txt` in any text editor.
 # === DAILY ===
 python update_data.py                                              # Update stock data
 python thermaltrend/signals.py --strategy ma_crossover --tickers AAPL MSFT --min-strength 0.5  # Today's signals
+
+# === DASHBOARD ===
+streamlit run thermaltrend/dashboard.py                            # Open visual dashboard in browser
 
 # === BACKTEST ===
 python thermaltrend/backtest.py --strategy ma_crossover --ticker AAPL --start 2024-01-01       # Basic backtest
