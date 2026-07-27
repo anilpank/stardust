@@ -114,3 +114,41 @@ class TestRunStrategyAnalysis:
         assert "metrics" in result
         assert "confidence" in result
         assert result["strategy_name"] == "test_strategy"
+
+    def test_end_date_extends_equity_curve(self):
+        dates = pd.bdate_range("2026-01-01", periods=20)
+        opens = [100.0 + i for i in range(20)]
+        closes = [100.5 + i for i in range(20)]
+
+        idx = pd.MultiIndex.from_arrays(
+            [dates, ["TEST"] * 20], names=["date", "ticker"]
+        )
+        price_data = pd.DataFrame(
+            {"Open": opens, "High": [o + 1 for o in opens],
+             "Low": [o - 1 for o in opens], "Close": closes, "Volume": [10000] * 20},
+            index=idx,
+        )
+
+        signals = [
+            SignalEvent(
+                timestamp=dates[2].to_pydatetime(),
+                ticker="TEST",
+                direction=SignalDirection.BUY,
+                strength=0.8,
+                strategy_id="test",
+            ),
+            SignalEvent(
+                timestamp=dates[10].to_pydatetime(),
+                ticker="TEST",
+                direction=SignalDirection.SELL,
+                strength=0.8,
+                strategy_id="test",
+            ),
+        ]
+
+        result = run_strategy_analysis(
+            signals, price_data, "test_strategy",
+            end_date=pd.Timestamp("2026-12-31"),
+        )
+        eq = result["equity_curve"]
+        assert eq.index[-1] >= pd.Timestamp("2026-12-29")

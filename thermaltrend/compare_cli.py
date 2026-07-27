@@ -66,7 +66,10 @@ def run_compare(
 
         engine = DataEngine(feed, strategy)
         signals = engine.run()
-        result = run_strategy_analysis(signals, feed._data, label)
+        result = run_strategy_analysis(
+            signals, feed._data, label,
+            end_date=pd.Timestamp(end_date) if end_date else None,
+        )
         results[label] = {"trades": result["trades"], "equity_curve": result["equity_curve"]}
 
     spy = pd.read_parquet(Path(__file__).parent / "data" / "equities" / "SPY.parquet")

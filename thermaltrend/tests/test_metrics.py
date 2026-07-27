@@ -77,6 +77,52 @@ class TestComputeEquityCurve:
         curve = compute_equity_curve([trade], pd.Timestamp("2026-01-01"))
         assert curve.iloc[-1] == 100_000.0
 
+    def test_end_date_extends_curve(self):
+        trade = _make_trade(
+            entry_date=datetime(2026, 1, 5),
+            exit_date=datetime(2026, 1, 15),
+            pnl=500.0,
+        )
+        curve = compute_equity_curve(
+            [trade], pd.Timestamp("2026-01-01"),
+            end_date=pd.Timestamp("2026-06-30"),
+        )
+        assert curve.index[0] == pd.Timestamp("2026-01-01")
+        assert curve.index[-1] >= pd.Timestamp("2026-06-29")
+        assert curve.iloc[-1] == curve.loc[pd.Timestamp("2026-01-15"):].iloc[0]
+
+    def test_end_date_none_uses_last_exit(self):
+        trade = _make_trade(
+            entry_date=datetime(2026, 1, 5),
+            exit_date=datetime(2026, 1, 15),
+            pnl=500.0,
+        )
+        curve_no_end = compute_equity_curve([trade], pd.Timestamp("2026-01-01"))
+        curve_with_end = compute_equity_curve(
+            [trade], pd.Timestamp("2026-01-01"), end_date=None,
+        )
+        assert len(curve_no_end) == len(curve_with_end)
+
+    def test_end_date_before_last_exit_uses_exit(self):
+        trade = _make_trade(
+            entry_date=datetime(2026, 1, 5),
+            exit_date=datetime(2026, 3, 15),
+            pnl=500.0,
+        )
+        curve = compute_equity_curve(
+            [trade], pd.Timestamp("2026-01-01"),
+            end_date=pd.Timestamp("2026-01-30"),
+        )
+        assert curve.index[-1] >= pd.Timestamp("2026-03-13")
+
+    def test_empty_trades_with_end_date(self):
+        curve = compute_equity_curve(
+            [], pd.Timestamp("2026-01-01"),
+            end_date=pd.Timestamp("2026-06-30"),
+        )
+        assert len(curve) == 1
+        assert curve.iloc[0] == 100_000.0
+
 
 class TestComputeAggregateMetrics:
     def test_no_trades(self):

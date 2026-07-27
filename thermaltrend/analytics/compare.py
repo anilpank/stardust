@@ -80,6 +80,7 @@ def run_strategy_analysis(
     price_data: pd.DataFrame,
     strategy_name: str,
     simulator: TradeSimulator | None = None,
+    end_date: pd.Timestamp | None = None,
 ) -> dict:
     """Full analysis pipeline for a single strategy.
 
@@ -88,6 +89,7 @@ def run_strategy_analysis(
         price_data: DataFrame with MultiIndex (date, ticker).
         strategy_name: Name for this strategy.
         simulator: Optional custom TradeSimulator.
+        end_date: Optional end date to extend equity curve to.
 
     Returns:
         Dict with trades, signals, equity_curve, per_ticker, metrics, confidence.
@@ -99,7 +101,9 @@ def run_strategy_analysis(
 
     if trades:
         first_entry = min(t.entry_date for t in trades)
-        equity_curve = compute_equity_curve(trades, pd.Timestamp(first_entry))
+        equity_curve = compute_equity_curve(
+            trades, pd.Timestamp(first_entry), end_date=end_date
+        )
     else:
         equity_curve = pd.Series([100_000.0])
 

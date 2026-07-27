@@ -18,7 +18,10 @@ TRADING_DAYS_PER_YEAR = 252
 
 
 def compute_equity_curve(
-    trades: list[Trade], start_date: pd.Timestamp, initial_capital: float = 100_000.0
+    trades: list[Trade],
+    start_date: pd.Timestamp,
+    initial_capital: float = 100_000.0,
+    end_date: pd.Timestamp | None = None,
 ) -> pd.Series:
     """Build a daily equity curve from completed trades.
 
@@ -26,6 +29,9 @@ def compute_equity_curve(
         trades: List of Trade objects.
         start_date: Start date for the equity curve.
         initial_capital: Starting portfolio value.
+        end_date: Optional end date. When provided the curve is extended to
+            this date so CAGR is computed over the full backtest window.
+            Dates after the last trade hold the final portfolio value.
 
     Returns:
         Series indexed by date with portfolio value.
@@ -33,7 +39,12 @@ def compute_equity_curve(
     if not trades:
         return pd.Series([initial_capital], index=[start_date])
 
-    dates = pd.date_range(start=start_date, end=trades[-1].exit_date, freq="B")
+    last_exit = trades[-1].exit_date
+    curve_end = end_date if end_date is not None else last_exit
+    if curve_end < last_exit:
+        curve_end = last_exit
+
+    dates = pd.date_range(start=start_date, end=curve_end, freq="B")
     equity = pd.Series(initial_capital, index=dates, dtype=float)
 
     for trade in trades:
