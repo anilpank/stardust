@@ -12,6 +12,8 @@ from thermaltrend.analytics.trade_simulator import Trade, TradeSimulator
 from thermaltrend.charts import (
     COLORS,
     _apply_layout,
+    alpha_vs_benchmark,
+    best_strategy_distribution,
     drawdown_chart,
     equity_curve,
     normalized_price_overlay,
@@ -22,6 +24,7 @@ from thermaltrend.charts import (
     price_with_signals,
     regime_bar,
     strategy_comparison_bar,
+    strategy_heatmap,
 )
 from thermaltrend.core.events import SignalDirection
 
@@ -251,6 +254,84 @@ class TestPeriodHeatmap:
         fig = period_heatmap(data)
         x_values = list(fig.data[0].x)
         assert x_values == ["2026-01", "2026-02", "2026-03"]
+
+
+class TestStrategyHeatmap:
+    def test_returns_figure(self):
+        df = pd.DataFrame(
+            {"MA 50/200": [0.10, 0.05], "Donchian 20/10": [0.08, 0.12]},
+            index=["AAPL", "MSFT"],
+        )
+        fig = strategy_heatmap(df, metric="cagr")
+        assert isinstance(fig, go.Figure)
+        assert len(fig.data) == 1
+        assert fig.data[0].type == "heatmap"
+
+    def test_empty_df(self):
+        fig = strategy_heatmap(pd.DataFrame(), metric="cagr")
+        assert len(fig.layout.annotations) > 0
+
+    def test_uses_correct_axis_labels(self):
+        df = pd.DataFrame(
+            {"MA 50/200": [0.10], "RSI 14": [0.05]},
+            index=["AAPL"],
+        )
+        fig = strategy_heatmap(df, metric="sharpe")
+        assert fig.layout.xaxis.title.text == "Strategy"
+        assert fig.layout.yaxis.title.text == "Ticker"
+
+    def test_custom_title(self):
+        df = pd.DataFrame({"A": [1.0]}, index=["X"])
+        fig = strategy_heatmap(df, title="My Heatmap")
+        assert "My Heatmap" in fig.layout.title.text
+
+
+class TestBestStrategyDistribution:
+    def test_returns_figure(self):
+        win_counts = pd.Series({"MA 50/200": 30, "Donchian 20/10": 20})
+        fig = best_strategy_distribution(win_counts)
+        assert isinstance(fig, go.Figure)
+        assert fig.data[0].type == "bar"
+
+    def test_empty_series(self):
+        fig = best_strategy_distribution(pd.Series(dtype=float))
+        assert len(fig.layout.annotations) > 0
+
+    def test_bar_count_matches_input(self):
+        win_counts = pd.Series({"A": 5, "B": 3, "C": 2})
+        fig = best_strategy_distribution(win_counts)
+        assert len(fig.data[0].x) == 3
+
+    def test_values_match_input(self):
+        win_counts = pd.Series({"MA 50/200": 15, "RSI 14": 8})
+        fig = best_strategy_distribution(win_counts)
+        assert list(fig.data[0].y) == [15, 8]
+
+
+class TestAlphaVsBenchmark:
+    def test_returns_figure(self):
+        strats = {"MA 50/200": 0.08, "Donchian 20/10": 0.12}
+        fig = alpha_vs_benchmark(strats, benchmark_cagr=0.10)
+        assert isinstance(fig, go.Figure)
+        assert fig.data[0].type == "bar"
+
+    def test_includes_benchmark_bar(self):
+        strats = {"A": 0.05}
+        fig = alpha_vs_benchmark(strats, benchmark_cagr=0.10)
+        labels = list(fig.data[0].x)
+        assert "S&P 500 B&H" in labels
+
+    def test_bar_count_matches_strategies_plus_benchmark(self):
+        strats = {"A": 0.05, "B": 0.08, "C": 0.12}
+        fig = alpha_vs_benchmark(strats, benchmark_cagr=0.10)
+        assert len(fig.data[0].x) == 4
+
+    def test_benchmark_line_present(self):
+        strats = {"A": 0.05}
+        fig = alpha_vs_benchmark(strats, benchmark_cagr=0.10)
+        shapes = fig.layout.shapes
+        line_shapes = [s for s in shapes if s.type == "line"]
+        assert len(line_shapes) >= 1
 
 
 class TestPriceWithSignals:

@@ -274,6 +274,99 @@ def normalized_price_overlay(
     return _apply_layout(fig, title)
 
 
+def strategy_heatmap(
+    pivot_df: pd.DataFrame, metric: str = "cagr", title: str | None = None
+) -> go.Figure:
+    """Heatmap of a metric across tickers (rows) x strategies (columns)."""
+    if pivot_df.empty:
+        fig = go.Figure()
+        fig.add_annotation(text="No data", showarrow=False, font=dict(size=20))
+        return _apply_layout(fig, title or "Strategy Heatmap", height=400)
+
+    fig = go.Figure(data=go.Heatmap(
+        z=pivot_df.values,
+        x=pivot_df.columns.tolist(),
+        y=pivot_df.index.tolist(),
+        colorscale="RdYlGn",
+        colorbar=dict(title=metric.replace("_", " ").title()),
+        hovertemplate="Ticker: %{y}<br>Strategy: %{x}<br>" + metric.replace("_", " ").title() + ": %{z:.2%}<extra></extra>",
+    ))
+    fig.update_layout(
+        xaxis_title="Strategy",
+        yaxis_title="Ticker",
+        yaxis=dict(autorange="reversed"),
+    )
+    label = title or f"Strategy {metric.replace('_', ' ').title()} Heatmap"
+    return _apply_layout(fig, label, height=max(400, min(1200, len(pivot_df) * 22 + 100)))
+
+
+def best_strategy_distribution(
+    win_counts: pd.Series, title: str = "Best Strategy Distribution"
+) -> go.Figure:
+    """Bar chart showing how many tickers each strategy wins."""
+    if win_counts.empty:
+        fig = go.Figure()
+        fig.add_annotation(text="No data", showarrow=False, font=dict(size=20))
+        return _apply_layout(fig, title, height=300)
+
+    strategy_colors = {
+        "MA 50/200": COLORS["blue"],
+        "Donchian 20/10": COLORS["green"],
+        "RSI 14": COLORS["orange"],
+        "ATR Trail 20/14/3": COLORS["purple"],
+    }
+    colors = [strategy_colors.get(s, COLORS["grey"]) for s in win_counts.index]
+
+    fig = go.Figure()
+    fig.add_trace(go.Bar(
+        x=win_counts.index.tolist(),
+        y=win_counts.values.tolist(),
+        marker_color=colors,
+        text=win_counts.values.tolist(),
+        textposition="auto",
+        name="Tickers Won",
+    ))
+    fig.update_layout(
+        xaxis_title="Strategy",
+        yaxis_title="Number of Tickers",
+        showlegend=False,
+    )
+    return _apply_layout(fig, title, height=350)
+
+
+def alpha_vs_benchmark(
+    strategy_cagrs: dict[str, float],
+    benchmark_cagr: float,
+    title: str = "Strategy CAGR vs S&P 500",
+) -> go.Figure:
+    """Bar chart comparing each strategy's aggregate CAGR to S&P 500 buy-and-hold."""
+    labels = list(strategy_cagrs.keys()) + ["S&P 500 B&H"]
+    values = [v * 100 for v in strategy_cagrs.values()] + [benchmark_cagr * 100]
+    colors = [COLORS["blue"], COLORS["green"], COLORS["orange"], COLORS["purple"], COLORS["grey"]]
+
+    fig = go.Figure()
+    fig.add_trace(go.Bar(
+        x=labels, y=values,
+        marker_color=colors[:len(labels)],
+        text=[f"{v:+.1f}%" for v in values],
+        textposition="auto",
+        name="CAGR",
+    ))
+
+    fig.add_hline(
+        y=benchmark_cagr * 100, line_dash="dash",
+        line_color=COLORS["grey"], line_width=1,
+        annotation_text=f"S&P 500: {benchmark_cagr * 100:+.1f}%",
+        annotation_position="bottom right",
+    )
+    fig.update_layout(
+        xaxis_title="Strategy",
+        yaxis_title="CAGR (%)",
+        showlegend=False,
+    )
+    return _apply_layout(fig, title, height=400)
+
+
 def period_heatmap(period_metrics: dict[str, dict], title: str = "Monthly P&L Heatmap") -> go.Figure:
     if not period_metrics:
         fig = go.Figure()

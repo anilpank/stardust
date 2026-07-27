@@ -19,6 +19,8 @@ import streamlit as st
 from thermaltrend.analytics.metrics import compute_benchmark_metrics, compute_equity_curve, compute_period_metrics
 from thermaltrend.analytics.regime import classify_regime, compute_regime_metrics
 from thermaltrend.charts import (
+    alpha_vs_benchmark,
+    best_strategy_distribution,
     drawdown_chart,
     equity_curve,
     normalized_price_overlay,
@@ -29,6 +31,7 @@ from thermaltrend.charts import (
     price_with_signals,
     regime_bar,
     strategy_comparison_bar,
+    strategy_heatmap,
 )
 from thermaltrend.compare_cli import run_compare
 from thermaltrend.core.engine import DataEngine
@@ -585,6 +588,165 @@ def page_compare_tickers():
     st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
 
+def page_best_strategy(start: str, end: str):
+    st.subheader("Best Strategy per Ticker (S&P 500)")
+    st.caption("Runs all 4 strategies on every S&P 500 constituent and shows which worked best for each ticker, compared against S&P 500 buy-and-hold returns.")
+
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        rank_metric = st.selectbox(
+            "Rank by",
+            ["cagr", "sharpe", "total_return"],
+            index=0,
+            key="best_rank_metric",
+        )
+    with col2:
+        ticker_limit = st.select_slider(
+            "Tickers to analyze",
+            options=[10, 25, 50, 100, 250, 500],
+            value=50,
+            key="best_ticker_limit",
+        )
+    with col3:
+        min_trades = st.number_input(
+            "Min trades to qualify", min_value=0, max_value=50, value=2,
+            help="Tickers with fewer completed trades than this are excluded from best-strategy ranking.",
+            key="best_min_trades",
+        )
+
+    actual_tickers = ALL_TICKERS[:ticker_limit]
+
+    cache_key = f"best_strategy_{start}_{end}_{rank_metric}_{ticker_limit}_{min_trades}"
+    cached = st.session_state.get(cache_key)
+
+    if st.button("Run Full Analysis", type="primary", use_container_width=True, key="run_best"):
+        from thermaltrend.analytics.compare import run_strategy_analysis
+        from thermaltrend.core.engine import DataEngine
+        from thermaltrend.feed import DataFeed
+
+        progress = st.progress(0, text="Starting analysis...")
+        results_matrix = []
+        total = len(actual_tickers) * len(STRATEGY_REGISTRY)
+        done = 0
+
+        for ticker in actual_tickers:
+            try:
+                feed = DataFeed(DEFAULT_DATA_DIR, tickers=[ticker], start_date=start, end_date=end)
+                if len(feed) == 0:
+                    done += len(STRATEGY_REGISTRY)
+                    progress.progress(done / total, text=f"Skipping {ticker} (no data)")
+                    continue
+
+                for strat_label, strat_cls in STRATEGY_REGISTRY.items():
+                    strategy = strat_cls(**STRATEGY_DEFAULTS[strat_label])
+                    engine = DataEngine(feed, strategy)
+                    signals = engine.run()
+                    result = run_strategy_analysis(
+                        signals, feed._data, strat_label,
+                        end_date=pd.Timestamp(end),
+                    )
+                    m = result["metrics"]
+                    completed = m.get("trades_completed", 0)
+
+                    results_matrix.append({
+                        "ticker": ticker,
+                        "strategy": strat_label,
+                        "cagr": m["cagr"],
+                        "sharpe": m["sharpe"],
+                        "total_return": m.get("total_return", 0.0),
+                        "max_drawdown": m["max_drawdown"],
+                        "win_rate": m["win_rate"],
+                        "total_trades": m["total_trades"],
+                        "trades_completed": completed,
+                    })
+                    done += 1
+                    progress.progress(
+                        done / total,
+                        text=f"Analyzing {ticker} — {strat_label} ({done}/{total})",
+                    )
+            except Exception:
+                done += len(STRATEGY_REGISTRY)
+                progress.progress(done / total, text=f"Error on {ticker}, skipping...")
+
+        progress.progress(1.0, text="Analysis complete!")
+        results_df = pd.DataFrame(results_matrix)
+        st.session_state[cache_key] = results_df
+        cached = results_df
+
+    if cached is None:
+        st.info("Click **Run Full Analysis** to compare all strategies across S&P 500 tickers.")
+        return
+
+    results_df = cached
+
+    qualified = results_df[results_df["trades_completed"] >= min_trades].copy()
+    if qualified.empty:
+        st.warning(f"No ticker-strategy pairs with >= {min_trades} completed trades. Try lowering the minimum.")
+        return
+
+    best_per_ticker = (
+        qualified.sort_values(rank_metric, ascending=False)
+        .groupby("ticker")
+        .first()
+        .reset_index()
+        .rename(columns={"strategy": "best_strategy"})
+    )
+
+    win_counts = best_per_ticker["best_strategy"].value_counts()
+
+    st.markdown("---")
+    st.subheader("Summary")
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Tickers Analyzed", len(actual_tickers))
+    c2.metric("Qualified (trades)", len(qualified["ticker"].unique()))
+    c3.metric("Most Winning Strategy", win_counts.index[0] if len(win_counts) > 0 else "N/A")
+    c4.metric("Its Wins", f"{win_counts.iloc[0]}/{len(best_per_ticker)}" if len(win_counts) > 0 else "N/A")
+
+    col_a, col_b = st.columns(2)
+    with col_a:
+        st.plotly_chart(best_strategy_distribution(win_counts), use_container_width=True)
+    with col_b:
+        spy = pd.read_parquet(Path(__file__).parent / "data" / "equities" / "SPY.parquet")
+        bench = compute_benchmark_metrics(spy, start, end)
+        strat_agg = qualified.groupby("strategy")[rank_metric].mean()
+        st.plotly_chart(
+            alpha_vs_benchmark(strat_agg.to_dict(), bench["cagr"]),
+            use_container_width=True,
+        )
+
+    st.markdown("---")
+    st.subheader(f"Strategy {rank_metric.replace('_', ' ').title()} Heatmap")
+    pivot = qualified.pivot_table(index="ticker", columns="strategy", values=rank_metric)
+    sort_order = pivot.mean().sort_values(ascending=False).index.tolist()
+    pivot = pivot[sort_order]
+    pivot = pivot.loc[best_per_ticker.set_index("ticker").sort_values(rank_metric, ascending=False).index]
+    st.plotly_chart(strategy_heatmap(pivot, metric=rank_metric), use_container_width=True)
+
+    st.markdown("---")
+    st.subheader("Per-Ticker Results")
+    display_df = best_per_ticker.copy()
+    display_df["cagr"] = display_df["cagr"].map(lambda x: f"{x * 100:+.1f}%")
+    display_df["sharpe"] = display_df["sharpe"].map(lambda x: f"{x:.2f}")
+    display_df["total_return"] = display_df["total_return"].map(lambda x: f"{x:+.1f}%")
+    display_df["max_drawdown"] = display_df["max_drawdown"].map(lambda x: f"{x * 100:.1f}%")
+    display_df["win_rate"] = display_df["win_rate"].map(lambda x: f"{x * 100:.0f}%")
+    display_df["total_trades"] = display_df["total_trades"].astype(str)
+    display_df["trades_completed"] = display_df["trades_completed"].astype(str)
+    display_df.columns = ["Ticker", "Best Strategy", "CAGR", "Sharpe", "Total Return", "Max Drawdown", "Win Rate", "Total Trades", "Completed Trades"]
+    st.dataframe(display_df, use_container_width=True, hide_index=True)
+
+    st.markdown("---")
+    st.subheader("All Strategy Results per Ticker")
+    full_display = results_df.copy()
+    full_display["cagr"] = full_display["cagr"].map(lambda x: f"{x * 100:+.1f}%")
+    full_display["sharpe"] = full_display["sharpe"].map(lambda x: f"{x:.2f}")
+    full_display["total_return"] = full_display["total_return"].map(lambda x: f"{x:+.1f}%")
+    full_display["max_drawdown"] = full_display["max_drawdown"].map(lambda x: f"{x * 100:.1f}%")
+    full_display["win_rate"] = full_display["win_rate"].map(lambda x: f"{x * 100:.0f}%")
+    full_display.columns = ["Ticker", "Strategy", "CAGR", "Sharpe", "Total Return", "Max Drawdown", "Win Rate", "Total Trades", "Completed Trades"]
+    st.dataframe(full_display, use_container_width=True, hide_index=True)
+
+
 def main():
     st.set_page_config(
         page_title="Thermaltrend Dashboard",
@@ -614,7 +776,7 @@ def main():
         tab_choice = st.radio(
             "Navigation",
             ["Overview", "Trades", "Per-Ticker", "Regime", "Signals", "Compare", "Saved Runs",
-             "Data Explorer", "Compare Tickers"],
+             "Data Explorer", "Compare Tickers", "Best Strategy"],
             label_visibility="collapsed",
         )
 
@@ -622,6 +784,13 @@ def main():
 
         if tab_choice in ("Data Explorer", "Compare Tickers"):
             st.info("Use the controls on the main page to configure this view.")
+        elif tab_choice == "Best Strategy":
+            st.info("Configure date range below, then click **Run Full Analysis** on the main page.")
+            col1, col2 = st.columns(2)
+            with col1:
+                start = st.date_input("Start", value=pd.Timestamp("2023-01-01").date(), key="best_start")
+            with col2:
+                end = st.date_input("End", value=pd.Timestamp("2026-07-01").date(), key="best_end")
         else:
             strategy_name = st.selectbox("Strategy", list(STRATEGY_REGISTRY.keys()), index=0)
             st.caption(STRATEGY_DESCRIPTIONS[strategy_name])
@@ -657,7 +826,7 @@ def main():
                     params["atr_period"] = st.number_input("ATR Period", 5, 50, 14)
                     params["atr_multiple"] = st.number_input("ATR Multiple", 1.0, 5.0, 3.0, 0.5)
 
-            run_backtest = tab_choice not in ("Compare", "Saved Runs")
+            run_backtest = tab_choice not in ("Compare", "Saved Runs", "Best Strategy")
 
             if run_backtest and st.button("Run Analysis", type="primary", use_container_width=True):
                 if not tickers:
@@ -682,7 +851,10 @@ def main():
                         signals = engine.run()
 
                         from thermaltrend.analytics.compare import run_strategy_analysis
-                        result = run_strategy_analysis(signals, feed._data, strategy_name)
+                        result = run_strategy_analysis(
+                            signals, feed._data, strategy_name,
+                            end_date=pd.Timestamp(end),
+                        )
                         st.session_state["result"] = result
                         st.session_state["running"] = False
                     except Exception as e:
@@ -706,6 +878,8 @@ def main():
         page_data_explorer()
     elif tab_choice == "Compare Tickers":
         page_compare_tickers()
+    elif tab_choice == "Best Strategy":
+        page_best_strategy(str(start), str(end))
     else:
         result = st.session_state.get("result")
         if result is None:
