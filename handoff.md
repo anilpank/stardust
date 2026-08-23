@@ -19,9 +19,9 @@ The data pipeline, event-driven engine, and analytics module are built. Data is 
 | Data range | 1970 → Jul 19 2026 (varies by ticker) |
 | Columns | Open, High, Low, Close, Volume (auto-adjusted) |
 | Strategies | 5 (MA Crossover, Donchian Breakout, RSI Mean Reversion, ATR Trailing Stop, Dual Momentum) |
-| Total source code | ~4,700 lines across 22 modules |
-| Total test code | ~5,200 lines across 23 test files (371 tests: 342 fast unit + 29 integration) |
-| Git commits | 48 |
+| Total source code | ~4,800 lines across 22 modules |
+| Total test code | ~5,200 lines across 24 test files (377 tests: 349 fast unit + 28 integration) |
+| Git commits | 55 |
 
 ## Scripts
 
@@ -37,8 +37,10 @@ The data pipeline, event-driven engine, and analytics module are built. Data is 
 | `signal_store.py` | Persist, query, and annotate signals | `cd thermaltrend && python thermaltrend/signal_store.py list` |
 | `dashboard.py` | Streamlit visual dashboard (run from repo root) | `streamlit run thermaltrend/dashboard.py` |
 
-Note: `dual_momentum` requires the benchmark ticker (SPY) in your ticker list — it learns
-the benchmark series from the event stream and produces no signals without it.
+Note: `dual_momentum` requires the benchmark ticker (SPY) in your ticker list on the CLI — it learns
+the benchmark series from the event stream and produces no signals without it. The **dashboard**
+injects SPY automatically (`resolve_feed_tickers()` in `dashboard.py`) for every strategy path, so
+no manual selection is needed there.
 
 All scripts accept `--tickers AAPL MSFT` for specific tickers and `--output PATH` for custom directories.
 
@@ -150,7 +152,7 @@ python -m thermaltrend.signals --strategy atr_trailing_stop --tickers AAPL MSFT 
 python -m thermaltrend.signals --strategy dual_momentum --tickers AAPL MSFT SPY --start 2024-01-01
 ```
 
-Test files (23 files, 371 tests):
+Test files (24 files, 377 tests):
 - `tests/test_events.py` — EventQueue, MarketEvent, SignalEvent
 - `tests/test_strategy.py` — all 5 strategies incl. DualMomentumStrategy
 - `tests/test_engine.py` — DataEngine integration
@@ -164,8 +166,8 @@ Test files (23 files, 371 tests):
 - `tests/test_backtest.py` — Backtest CLI + library (incl. all-strategies smoke test)
 - `tests/test_compare_cli.py` — Compare CLI + library
 - `tests/test_signal_store.py` — Signal persistence and annotation
-- `tests/test_dashboard.py` / `test_charts.py` — Dashboard registries/constants + chart builders
-- `tests/test_download_data.py`, `test_update_data.py`, `test_show_start_dates.py` (+ `*_integration.py` variants) — data pipeline
+- `tests/test_dashboard.py` / `test_charts.py` — Dashboard registries/constants + `resolve_feed_tickers()` benchmark injection + chart builders
+- `tests/test_download_data.py`, `test_update_data.py`, `test_show_start_dates.py` (+ `*_integration.py` variants) — data pipeline (integration tests pass fixture dirs via `--data-dir`, not cwd)
 - `tests/test_hello.py` — import smoke tests
 
 Pre-commit hook: `.pre-commit-config.yaml` runs `pytest -m "not slow" -q` on every `git commit`.
@@ -176,7 +178,7 @@ Pre-commit hook: `.pre-commit-config.yaml` runs `pytest -m "not slow" -q` on eve
 |------|-------------|
 | `thermaltrend/download_data.py` | Full data download with `yfinance` |
 | `thermaltrend/update_data.py` | Incremental update with `gc.collect()` fix for file descriptor leak |
-| `thermaltrend/show_start_dates.py` | Data availability inspector |
+| `thermaltrend/show_start_dates.py` | Data availability inspector (`--data-dir` flag for custom locations) |
 | `thermaltrend/feed.py` | `DataFeed` class + `Bar` dataclass — loads Parquet files, yields bars chronologically |
 | `thermaltrend/backtest.py` | `run_backtest()` library function + CLI — single-strategy backtest with metrics |
 | `thermaltrend/compare_cli.py` | `run_compare()` library function + CLI — multi-strategy ranking with benchmark |
@@ -210,6 +212,10 @@ Pre-commit hook: `.pre-commit-config.yaml` runs `pytest -m "not slow" -q` on eve
 
 5. **Analytics assumes next-day execution:** Trade simulator enters/exits at next day's open. If a signal fires on the last day of data, the trade is closed at that day's close with `exit_reason="data_end"`.
 
+6. **Bars are processed alphabetically per date:** The engine yields same-day bars in ticker-alphabetical order. A strategy comparing two tickers (e.g., Dual Momentum vs SPY) only sees the benchmark's *previous* close when evaluating a ticker earlier in the alphabet — a one-day lookback lag, not lookahead bias. Dual Momentum tests rely on this behavior; don't "fix" it casually.
+
+7. **Dual Momentum silently no-ops without benchmark bars:** If SPY (or the configured `benchmark_ticker`) isn't in the feed, the strategy emits zero signals instead of erroring. The dashboard guards against this via `resolve_feed_tickers()`; CLI users must include SPY themselves.
+
 ## Architecture Vision (from ARCHITECTURE.md)
 
 The planned system has 6 layers:
@@ -233,8 +239,10 @@ pip install pandas numpy yfinance requests pyarrow pytest pre-commit
 ## If Starting a New Session
 
 - Run `git log --oneline -5` to see recent commits
-- Run `pytest thermaltrend/tests/ -m "not slow" -v` to confirm tests pass (342 fast unit tests)
+- Run `pytest thermaltrend/tests/ -m "not slow" -v` to confirm tests pass (349 fast unit tests)
+- If resuming after a break, run `python thermaltrend/update_data.py` to refresh all 502 parquet files (last full update: Jul 19 2026)
 - Run `python thermaltrend/update_data.py --tickers AAPL` to verify the data pipeline works
+- Run `streamlit run thermaltrend/dashboard.py` and try the Compare tab (Dual Momentum should appear with SPY auto-added)
 - Run `python thermaltrend/feed.py` to verify the data feed loads correctly
 - Run `python -m thermaltrend.signals --tickers AAPL MSFT --start 2024-01-01` to verify signal generation works
 - Try the backtest:

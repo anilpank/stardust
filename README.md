@@ -43,7 +43,7 @@ thermaltrend/
 ├── dashboard.py                   # Streamlit dashboard: backtests, signals, comparisons,
 │                                  #   Data Explorer, Compare Tickers
 ├── charts.py                      # Plotly chart builders used by the dashboard
-└── tests/                         # 371 tests across 23 files (342 fast unit + 29 integration)
+└── tests/                         # 377 tests across 24 files (349 fast unit + 28 integration)
 ```
 
 ## Running Scripts
@@ -355,7 +355,7 @@ A Streamlit dashboard wraps the full workflow in a point-and-click interface:
 streamlit run thermaltrend/dashboard.py
 ```
 
-Tabs: Overview (metric cards, equity curve, drawdown, P&L distribution, price & signals), Trades, Per-Ticker, Regime, Signals, Compare, Saved Runs, plus standalone Data Explorer and Compare Tickers pages. See `USER_GUIDE.md` Section 10 for a walkthrough.
+Tabs: Overview (metric cards, equity curve, drawdown, P&L distribution, price & signals), Trades, Per-Ticker, Regime, Signals, Compare, Saved Runs, plus standalone Data Explorer and Compare Tickers pages. Dual Momentum is fully supported — SPY is auto-added as its benchmark. See `USER_GUIDE.md` Section 10 for a walkthrough.
 
 ## Running Tests
 

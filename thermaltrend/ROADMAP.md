@@ -1,6 +1,6 @@
 # Thermaltrend Implementation Roadmap
 
-**Date:** July 2026
+**Date:** July 2026 (updated August 2026)
 **Context:** Updated from DESIGN.md — system goal is to test, validate, and select the best performing strategies across multiple classes.
 
 ---
@@ -21,11 +21,11 @@ Working pipeline: **DataFeed → DataEngine → Strategy → SignalEvents → Tr
 | Compare CLI (`compare_cli.py`) | Built |
 | Signal Persistence (`signal_store.py`) | Built |
 | Per-Period Breakdown (monthly/quarterly/yearly) | Built |
-| Streamlit Dashboard (`dashboard.py` + `charts.py`) | Built |
+| Streamlit Dashboard (`dashboard.py` + `charts.py`) | Built (Dual Momentum supported — benchmark auto-injected via `resolve_feed_tickers()`) |
 | Portfolio & Risk | Not built |
 | Execution Handler | Not built |
 
-Source: ~4,700 lines across 22 modules. Tests: ~5,200 lines across 23 files (371 tests; 342 fast unit + 29 integration).
+Source: ~4,800 lines across 22 modules. Tests: ~5,200 lines across 24 files (377 tests; 349 fast unit + 28 integration).
 
 ---
 
@@ -71,7 +71,7 @@ You need multiple strategies to have anything meaningful to compare. Build simpl
 | 2 | Donchian Breakout | Trend | Complementary to MA (entry/exit logic differs) | Done |
 | 3 | RSI Mean Reversion | Mean Reversion | Tests a completely different regime (sideways markets) | Done |
 | 4 | ATR Trailing Stop | Trend | Volatility-based risk management | Done |
-| 5 | Dual Momentum | Momentum | Absolute + relative momentum vs benchmark (SPY). Benchmark series learned from event stream — include SPY in ticker list. Default lookback 126 days. | Done |
+| 5 | Dual Momentum | Momentum | Absolute + relative momentum vs benchmark (SPY). Benchmark series learned from event stream — CLI needs SPY in the ticker list; the dashboard injects it automatically. Default lookback 126 days. | Done |
 | 6 | Simple Factor Scoring | Factor | Multi-signal composite rank | Medium-High |
 
 ```
@@ -142,7 +142,8 @@ Phase 2 cont (done) →  signal_store.py + backtest.py + compare_cli.py (persist
 Phase 3 (nearly done) → 5 of 6 strategies built; factor scorer next
 Phase 3a (done)     →  per-period breakdown (monthly/quarterly/yearly) in metrics + report + CLI
 Phase 3b (done)     →  Streamlit dashboard (dashboard.py, charts.py): Overview, Trades, Per-Ticker,
-                       Regime, Signals, Compare, Saved Runs, Data Explorer, Compare Tickers tabs
+                       Regime, Signals, Compare, Saved Runs, Data Explorer, Compare Tickers tabs;
+                       Dual Momentum fully supported (SPY benchmark auto-injected into every feed)
 Phase 4 (next)      →  portfolio/ package (position sizing, PnL)
 Phase 5 (later)     →  execution/ (OrderEvent, FillEvent, simulated fills)
 Phase 6 (future)    →  live broker bridge
