@@ -470,3 +470,111 @@ class ATRTrailingStopStrategy(Strategy):
                 )
 
         return None
+
+
+class DualMomentumStrategy(Strategy):
+    """Dual Momentum strategy (absolute + relative momentum).
+
+    Combines time-series (absolute) momentum with cross-sectional (relative)
+    momentum against a benchmark:
+
+    - BUY when flat and the ticker's lookback return is positive (absolute
+      momentum) AND exceeds the benchmark's lookback return (relative momentum).
+    - SELL when in position and either condition fails: the ticker's lookback
+      return drops to zero or below, or falls to the benchmark's level or below.
+
+    The benchmark price series is learned from the event stream itself — include
+    the benchmark ticker (default SPY) in your ticker list. No signals are ever
+    generated for the benchmark itself; it only provides reference data.
+
+    Because bars arrive in strict chronological order, only past data is used.
+    If the benchmark's same-date bar has not been delivered yet (tickers are
+    processed alphabetically within a date), the latest available benchmark
+    close is used — still strictly historical.
+
+    Requires ``lookback + 1`` bars of history for both the ticker and the
+    benchmark before producing any signals. If the benchmark never appears,
+    the strategy stays silent (no signals, no errors).
+    """
+
+    def __init__(
+        self,
+        lookback: int = 126,
+        benchmark_ticker: str = "SPY",
+        strength_scale: float = 5.0,
+        strategy_id: str = "dual_momentum",
+    ) -> None:
+        self.lookback = lookback
+        self.benchmark_ticker = benchmark_ticker
+        self.strength_scale = strength_scale
+        self.strategy_id = strategy_id
+        self._closes: dict[str, list[float]] = {}
+        self._in_position: dict[str, bool] = {}
+
+    def _momentum(self, closes: list[float]) -> float:
+        """Total return over the lookback window (latest vs N bars ago)."""
+        return closes[-1] / closes[-1 - self.lookback] - 1.0
+
+    def on_market(self, event: MarketEvent) -> SignalEvent | None:
+        ticker = event.ticker
+        if ticker not in self._closes:
+            self._closes[ticker] = []
+            self._in_position[ticker] = False
+
+        self._closes[ticker].append(event.close)
+
+        # The benchmark itself is never traded — reference data only.
+        if ticker == self.benchmark_ticker:
+            return None
+
+        bench_closes = self._closes.get(self.benchmark_ticker)
+        if (
+            len(self._closes[ticker]) < self.lookback + 1
+            or bench_closes is None
+            or len(bench_closes) < self.lookback + 1
+        ):
+            return None
+
+        momentum = self._momentum(self._closes[ticker])
+        bench_momentum = self._momentum(bench_closes)
+
+        metadata = {
+            "momentum": round(momentum, 6),
+            "benchmark_momentum": round(bench_momentum, 6),
+            "benchmark_ticker": self.benchmark_ticker,
+            "lookback": self.lookback,
+        }
+
+        if not self._in_position[ticker]:
+            if momentum > 0.0 and momentum > bench_momentum:
+                self._in_position[ticker] = True
+                metadata["absolute_pass"] = True
+                metadata["relative_pass"] = True
+                strength = min(
+                    (momentum - bench_momentum) * self.strength_scale, 1.0
+                )
+                return SignalEvent(
+                    timestamp=event.timestamp,
+                    ticker=ticker,
+                    direction=SignalDirection.BUY,
+                    strength=round(max(strength, 0.01), 4),
+                    strategy_id=self.strategy_id,
+                    metadata=metadata,
+                )
+        else:
+            if momentum <= 0.0 or momentum <= bench_momentum:
+                self._in_position[ticker] = False
+                metadata["absolute_pass"] = momentum > 0.0
+                metadata["relative_pass"] = momentum > bench_momentum
+                deficit = max(0.0, bench_momentum) - momentum
+                strength = min(deficit * self.strength_scale, 1.0)
+                return SignalEvent(
+                    timestamp=event.timestamp,
+                    ticker=ticker,
+                    direction=SignalDirection.SELL,
+                    strength=round(max(strength, 0.01), 4),
+                    strategy_id=self.strategy_id,
+                    metadata=metadata,
+                )
+
+        return None

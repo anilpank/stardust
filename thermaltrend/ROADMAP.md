@@ -16,15 +16,16 @@ Working pipeline: **DataFeed → DataEngine → Strategy → SignalEvents → Tr
 | Strategy Engine (Strategy ABC + MACrossoverStrategy) | Built |
 | Signals CLI (`signals.py`) | Built |
 | Analytics & Metrics | Built |
-| Strategy Library (multi-class) | 4 of ~6 strategies |
+| Strategy Library (multi-class) | 5 of ~6 strategies |
 | Backtest CLI (`backtest.py`) | Built |
 | Compare CLI (`compare_cli.py`) | Built |
 | Signal Persistence (`signal_store.py`) | Built |
 | Per-Period Breakdown (monthly/quarterly/yearly) | Built |
+| Streamlit Dashboard (`dashboard.py` + `charts.py`) | Built |
 | Portfolio & Risk | Not built |
 | Execution Handler | Not built |
 
-Source: ~3,000 lines across 17 modules. Tests: ~3,600 lines across 21 files (235 unit tests).
+Source: ~4,700 lines across 22 modules. Tests: ~5,200 lines across 23 files (371 tests; 342 fast unit + 29 integration).
 
 ---
 
@@ -60,7 +61,7 @@ thermaltrend/analytics/
 
 ## Recommended Build Order (Updated)
 
-### Phase 3: Strategy Library (build next)
+### Phase 3: Strategy Library (5 of 6 built)
 
 You need multiple strategies to have anything meaningful to compare. Build simplest first — each teaches something about the framework's flexibility.
 
@@ -70,7 +71,7 @@ You need multiple strategies to have anything meaningful to compare. Build simpl
 | 2 | Donchian Breakout | Trend | Complementary to MA (entry/exit logic differs) | Done |
 | 3 | RSI Mean Reversion | Mean Reversion | Tests a completely different regime (sideways markets) | Done |
 | 4 | ATR Trailing Stop | Trend | Volatility-based risk management | Done |
-| 5 | Dual Momentum | Momentum | Cross-asset relative strength | Medium |
+| 5 | Dual Momentum | Momentum | Absolute + relative momentum vs benchmark (SPY). Benchmark series learned from event stream — include SPY in ticker list. Default lookback 126 days. | Done |
 | 6 | Simple Factor Scoring | Factor | Multi-signal composite rank | Medium-High |
 
 ```
@@ -84,6 +85,11 @@ thermaltrend/
     ├── dual_momentum.py
     └── factor_scorer.py
 ```
+
+Note: strategies currently live in `thermaltrend/core/strategy.py`. Splitting them
+into a `strategy/` subpackage is optional refactoring — the registry pattern in
+`signals.py`, `backtest.py`, `compare_cli.py`, and `dashboard.py` makes each new
+strategy immediately available everywhere.
 
 The existing `Strategy` ABC is already clean — each new strategy is just a new file implementing `on_market(event) -> SignalEvent | None`. The signals CLI already has a `--strategy` flag with a registry dict, so adding a strategy name there makes it immediately CLI-runnable.
 
@@ -99,33 +105,6 @@ pending = store.get_pending_signals()
 ```
 
 Saved to `thermaltrend/data/signals/` (one Parquet per run) and `thermaltrend/data/actions/` (annotations).
-
-### Phase 3: Strategy Library (4 of 6 built)
-
-You need multiple strategies to have anything meaningful to compare. Build simplest first — each teaches something about the framework's flexibility.
-
-| # | Strategy | Class | Why | Complexity |
-|---|----------|-------|-----|------------|
-| 1 | MACrossover | Trend | Built | Done |
-| 2 | Donchian Breakout | Trend | Complementary to MA (entry/exit logic differs) | Done |
-| 3 | RSI Mean Reversion | Mean Reversion | Tests a completely different regime (sideways markets) | Done |
-| 4 | ATR Trailing Stop | Trend | Volatility-based risk management | Done |
-| 5 | Dual Momentum | Momentum | Cross-asset relative strength | Medium |
-| 6 | Simple Factor Scoring | Factor | Multi-signal composite rank | Medium-High |
-
-```
-thermaltrend/
-└── strategy/
-    ├── __init__.py
-    ├── ma_crossover.py        # Move existing MACrossoverStrategy here
-    ├── donchian_breakout.py
-    ├── rsi_mean_reversion.py
-    ├── atr_trailing_stop.py
-    ├── dual_momentum.py
-    └── factor_scorer.py
-```
-
-The existing `Strategy` ABC is already clean — each new strategy is just a new file implementing `on_market(event) -> SignalEvent | None`. The signals CLI already has a `--strategy` flag with a registry dict, so adding a strategy name there makes it immediately CLI-runnable.
 
 ### Phase 4: Portfolio & Execution (for actual trading)
 
@@ -160,11 +139,13 @@ thermaltrend/
 ```
 Phase 2 (done)      →  analytics/metrics.py + report.py + trade_simulator.py + regime.py + compare.py
 Phase 2 cont (done) →  signal_store.py + backtest.py + compare_cli.py (persistence + CLI tools)
-Phase 3 (partial)   →  4 of 6 strategies built; dual momentum, factor scorer next
+Phase 3 (nearly done) → 5 of 6 strategies built; factor scorer next
 Phase 3a (done)     →  per-period breakdown (monthly/quarterly/yearly) in metrics + report + CLI
+Phase 3b (done)     →  Streamlit dashboard (dashboard.py, charts.py): Overview, Trades, Per-Ticker,
+                       Regime, Signals, Compare, Saved Runs, Data Explorer, Compare Tickers tabs
 Phase 4 (next)      →  portfolio/ package (position sizing, PnL)
 Phase 5 (later)     →  execution/ (OrderEvent, FillEvent, simulated fills)
 Phase 6 (future)    →  live broker bridge
 ```
 
-**Next up:** Dual Momentum (cross-asset relative strength introduces a new dimension beyond single-ticker analysis) + Factor Scoring (multi-signal composite rank).
+**Next up:** Simple Factor Scoring (multi-signal composite rank) — the last strategy in Phase 3. Then Phase 4: the `portfolio/` package (position sizing, risk limits).

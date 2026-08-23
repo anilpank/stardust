@@ -14,6 +14,7 @@ from thermaltrend.core.engine import DataEngine
 from thermaltrend.core.strategy import (
     ATRTrailingStopStrategy,
     DonchianBreakoutStrategy,
+    DualMomentumStrategy,
     MACrossoverStrategy,
     RSIMeanReversionStrategy,
 )
@@ -31,6 +32,7 @@ STRATEGIES = {
     "atr_trailing_stop": lambda: ATRTrailingStopStrategy(
         entry_period=20, atr_period=14, atr_multiple=3.0
     ),
+    "dual_momentum": lambda: DualMomentumStrategy(lookback=126, benchmark_ticker="SPY"),
 }
 
 

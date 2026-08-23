@@ -19,6 +19,7 @@ from thermaltrend.core.engine import DataEngine
 from thermaltrend.core.strategy import (
     ATRTrailingStopStrategy,
     DonchianBreakoutStrategy,
+    DualMomentumStrategy,
     MACrossoverStrategy,
     RSIMeanReversionStrategy,
 )
@@ -31,6 +32,7 @@ STRATEGY_REGISTRY = {
     "donchian": {"cls": DonchianBreakoutStrategy, "label": "Donchian 20/10", "params": {}},
     "rsi_mean_reversion": {"cls": RSIMeanReversionStrategy, "label": "RSI 14", "params": {}},
     "atr_trailing_stop": {"cls": ATRTrailingStopStrategy, "label": "ATR Trail 20/14/3", "params": {}},
+    "dual_momentum": {"cls": DualMomentumStrategy, "label": "Dual Mom 126d", "params": {}},
 }
 
 
