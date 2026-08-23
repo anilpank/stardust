@@ -107,6 +107,50 @@ class TestDashboardConstants:
         assert ALL_TICKERS == sorted(ALL_TICKERS)
 
 
+class TestResolveFeedTickers:
+    """Dual Momentum needs its benchmark bars in the feed even though it
+    never trades them. The dashboard ticker picker excludes SPY by design,
+    so resolve_feed_tickers injects it."""
+
+    def test_other_strategies_unchanged(self):
+        from thermaltrend.dashboard import resolve_feed_tickers
+        for name in ["MA 50/200", "Donchian 20/10", "RSI 14", "ATR Trail 20/14/3"]:
+            assert resolve_feed_tickers(name, ["AAPL", "MSFT"]) == ["AAPL", "MSFT"]
+
+    def test_dual_momentum_appends_spy(self):
+        from thermaltrend.dashboard import resolve_feed_tickers
+        result = resolve_feed_tickers("Dual Mom 126d", ["AAPL", "MSFT"])
+        assert result == ["AAPL", "MSFT", "SPY"]
+
+    def test_dual_momentum_no_duplicate_when_spy_selected(self):
+        from thermaltrend.dashboard import resolve_feed_tickers
+        assert resolve_feed_tickers("Dual Mom 126d", ["AAPL", "SPY"]) == ["AAPL", "SPY"]
+
+    def test_custom_benchmark_from_params(self):
+        from thermaltrend.dashboard import resolve_feed_tickers
+        result = resolve_feed_tickers("Dual Mom 126d", ["AAPL"], {"benchmark_ticker": "QQQ"})
+        assert result == ["AAPL", "QQQ"]
+
+    def test_custom_benchmark_already_present(self):
+        from thermaltrend.dashboard import resolve_feed_tickers
+        result = resolve_feed_tickers(
+            "Dual Mom 126d", ["QQQ"], {"benchmark_ticker": "QQQ"}
+        )
+        assert result == ["QQQ"]
+
+    def test_defaults_used_when_params_empty(self):
+        from thermaltrend.dashboard import STRATEGY_DEFAULTS, resolve_feed_tickers
+        benchmark = STRATEGY_DEFAULTS["Dual Mom 126d"]["benchmark_ticker"]
+        result = resolve_feed_tickers("Dual Mom 126d", ["AAPL"], {})
+        assert result == ["AAPL", benchmark]
+
+    def test_does_not_mutate_input(self):
+        from thermaltrend.dashboard import resolve_feed_tickers
+        tickers = ["AAPL"]
+        resolve_feed_tickers("Dual Mom 126d", tickers)
+        assert tickers == ["AAPL"]
+
+
 class TestBacktestIntegration:
     """End-to-end test: run a backtest and verify the full data flow
     that the dashboard relies on."""
