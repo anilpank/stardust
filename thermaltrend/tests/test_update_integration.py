@@ -45,13 +45,11 @@ class TestUpdateIntegration:
         assert len(after) >= before_count
         assert after.index.max() >= before.index.max()
 
-    def test_update_no_existing_files(self, tmp_path):
-        result = subprocess.run(
-            [sys.executable, str(UPDATE_SCRIPT), "--output", str(tmp_path)],
-            capture_output=True, text=True, timeout=30,
-        )
-        assert result.returncode == 0
-        assert "No parquet files found" in result.stdout
+    # Note: there is deliberately no "empty directory" integration test here.
+    # update_data.py auto-downloads SPY when the data dir has no files (see
+    # test_update_downloads_spy_when_missing), so the old expectation of a
+    # "No parquet files found" message on an empty dir is unreachable. The
+    # underlying logic is covered by fast unit tests in test_update_data.py.
 
     def test_update_specific_tickers(self, tmp_path):
         _download_ticker(tmp_path, "AAPL", "2024-01-01", "2024-02-01")

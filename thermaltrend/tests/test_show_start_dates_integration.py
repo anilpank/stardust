@@ -31,72 +31,49 @@ def equities_dir(tmp_path):
     return tmp_path
 
 
+def _run_script(equities_dir, extra_args=None):
+    """Run show_start_dates.py against the fixture data directory."""
+    return subprocess.run(
+        [sys.executable, str(SCRIPT), "--data-dir", str(equities_dir)]
+        + (extra_args or []),
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+
 @pytest.mark.slow
 class TestShowStartDatesIntegration:
     def test_runs_successfully(self, equities_dir):
-        result = subprocess.run(
-            [sys.executable, str(SCRIPT)],
-            capture_output=True,
-            text=True,
-            timeout=30,
-            cwd=str(THERMALTREND_DIR),
-        )
+        result = _run_script(equities_dir)
         assert result.returncode == 0, result.stderr
 
-    def test_output_contains_all_tickers(self, equities_dir, monkeypatch):
-        monkeypatch.setattr("show_start_dates.DATA_DIR", equities_dir)
-
-        result = subprocess.run(
-            [sys.executable, "-c", f"import sys; sys.path.insert(0, '.'); "
-             f"from show_start_dates import DATA_DIR; "
-             f"from pathlib import Path; "
-             f"import show_start_dates; "
-             f"show_start_dates.DATA_DIR = Path('{equities_dir}'); "
-             f"show_start_dates.main()"],
-            capture_output=True,
-            text=True,
-            timeout=30,
-            cwd=str(THERMALTREND_DIR),
-        )
+    def test_output_contains_all_tickers(self, equities_dir):
+        result = _run_script(equities_dir)
         assert result.returncode == 0, result.stderr
         assert "AAPL" in result.stdout
         assert "MSFT" in result.stdout
 
     def test_sort_by_start(self, equities_dir):
-        result = subprocess.run(
-            [sys.executable, str(SCRIPT), "--sort", "start"],
-            capture_output=True,
-            text=True,
-            timeout=30,
-            cwd=str(THERMALTREND_DIR),
-        )
+        result = _run_script(equities_dir, ["--sort", "start"])
         assert result.returncode == 0, result.stderr
-        assert "MSFT" in result.stdout
-        assert "AAPL" in result.stdout
+        # MSFT (1990) starts before AAPL (2010)
+        msft_pos = result.stdout.find("MSFT")
+        aapl_pos = result.stdout.find("AAPL")
+        assert msft_pos < aapl_pos
 
     def test_sort_by_ticker(self, equities_dir):
-        result = subprocess.run(
-            [sys.executable, str(SCRIPT), "--sort", "ticker"],
-            capture_output=True,
-            text=True,
-            timeout=30,
-            cwd=str(THERMALTREND_DIR),
-        )
+        result = _run_script(equities_dir, ["--sort", "ticker"])
         assert result.returncode == 0, result.stderr
         output = result.stdout
         aapl_pos = output.find("AAPL")
         msft_pos = output.find("MSFT")
         assert aapl_pos < msft_pos
 
-    def test_csv_export(self, equities_dir, tmp_path):
-        csv_path = tmp_path / "result.csv"
-        result = subprocess.run(
-            [sys.executable, str(SCRIPT), "--csv", str(csv_path)],
-            capture_output=True,
-            text=True,
-            timeout=30,
-            cwd=str(THERMALTREND_DIR),
-        )
+    def test_csv_export(self, equities_dir):
+        # Safe to write inside the data dir — the script globs *.parquet only.
+        csv_path = equities_dir / "result.csv"
+        result = _run_script(equities_dir, ["--csv", str(csv_path)])
         assert result.returncode == 0, result.stderr
         assert csv_path.exists()
 
@@ -105,12 +82,6 @@ class TestShowStartDatesIntegration:
         assert set(df["ticker"].tolist()) == {"AAPL", "MSFT"}
 
     def test_total_companies_in_output(self, equities_dir):
-        result = subprocess.run(
-            [sys.executable, str(SCRIPT)],
-            capture_output=True,
-            text=True,
-            timeout=30,
-            cwd=str(THERMALTREND_DIR),
-        )
+        result = _run_script(equities_dir)
         assert result.returncode == 0, result.stderr
         assert "Total companies: 2" in result.stdout
