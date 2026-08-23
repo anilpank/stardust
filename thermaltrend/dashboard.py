@@ -68,10 +68,34 @@ STRATEGY_DESCRIPTIONS = {
     "Donchian 20/10": "Buys when price breaks above the 20-day high. Sells when it drops below the 10-day low. Captures breakouts with quick exits.",
     "RSI 14": "Buys when RSI bounces off oversold (30). Sells when it drops from overbought (70). Best for range-bound markets.",
     "ATR Trail 20/14/3": "Buys on 20-day breakout, exits via ATR-based trailing stop that ratchets up. Lets winners run while protecting gains.",
-    "Dual Mom 126d": "Buys when a stock's 126-day return is positive AND beats SPY's return. Sells when either condition fails. Requires SPY in your ticker selection.",
+    "Dual Mom 126d": "Buys when a stock's lookback return is positive AND beats the benchmark's return. Sells when either condition fails. SPY is added automatically as the benchmark.",
 }
 
+DUAL_MOMENTUM_LABEL = "Dual Mom 126d"
+BENCHMARK_TICKER = "SPY"
+
 ALL_TICKERS = sorted(p.stem for p in Path(DEFAULT_DATA_DIR).glob("*.parquet") if p.stem != "SPY")
+
+
+def resolve_feed_tickers(
+    strategy_name: str, tickers: list[str], params: dict | None = None
+) -> list[str]:
+    """Return the feed ticker list, adding the benchmark for Dual Momentum.
+
+    Dual Momentum learns the benchmark price series from the event stream,
+    so its bars must be part of the feed even though the strategy never
+    trades the benchmark itself. The dashboard's ticker picker excludes SPY
+    by design, so the benchmark is injected here automatically.
+    """
+    if strategy_name != DUAL_MOMENTUM_LABEL:
+        return list(tickers)
+    if params and params.get("benchmark_ticker"):
+        benchmark = params["benchmark_ticker"]
+    else:
+        benchmark = STRATEGY_DEFAULTS[DUAL_MOMENTUM_LABEL]["benchmark_ticker"]
+    if benchmark not in tickers:
+        return [*tickers, benchmark]
+    return list(tickers)
 
 
 def _metric_card(label: str, value: str, delta: str | None = None, delta_color: str = "normal"):
@@ -351,7 +375,12 @@ def page_signals(strategy_name: str, tickers: list[str], start: str, end: str):
         with st.spinner("Running strategy..."):
             strategy_cls = STRATEGY_REGISTRY[strategy_name]
             strategy = strategy_cls(**STRATEGY_DEFAULTS[strategy_name])
-            feed = DataFeed(DEFAULT_DATA_DIR, tickers=tickers, start_date=start, end_date=end)
+            feed = DataFeed(
+                DEFAULT_DATA_DIR,
+                tickers=resolve_feed_tickers(strategy_name, list(tickers)),
+                start_date=start,
+                end_date=end,
+            )
 
             if len(feed) == 0:
                 st.error("No data found for the selected tickers and date range.")
@@ -400,10 +429,14 @@ def page_compare(tickers: list[str], start: str, end: str):
         index=0,
     )
 
+    comparison_tickers = resolve_feed_tickers(DUAL_MOMENTUM_LABEL, list(tickers))
+    if comparison_tickers != tickers:
+        st.caption(f"{BENCHMARK_TICKER} added to the universe as the Dual Momentum benchmark.")
+
     if st.button("Run Comparison", type="primary", key="run_compare"):
         with st.spinner("Running all strategies..."):
             ranking, results = run_compare(
-                tickers=tickers,
+                tickers=comparison_tickers,
                 start_date=start,
                 end_date=end,
                 sort_by=sort_by,
@@ -635,7 +668,14 @@ def page_best_strategy(start: str, end: str):
 
         for ticker in actual_tickers:
             try:
-                feed = DataFeed(DEFAULT_DATA_DIR, tickers=[ticker], start_date=start, end_date=end)
+                # Dual Momentum needs its benchmark bars in the stream even
+                # though it never trades them.
+                feed = DataFeed(
+                    DEFAULT_DATA_DIR,
+                    tickers=resolve_feed_tickers(DUAL_MOMENTUM_LABEL, [ticker]),
+                    start_date=start,
+                    end_date=end,
+                )
                 if len(feed) == 0:
                     done += len(STRATEGY_REGISTRY)
                     progress.progress(done / total, text=f"Skipping {ticker} (no data)")
@@ -829,6 +869,10 @@ def main():
                     params["entry_period"] = st.number_input("Entry Period", 5, 100, 20)
                     params["atr_period"] = st.number_input("ATR Period", 5, 50, 14)
                     params["atr_multiple"] = st.number_input("ATR Multiple", 1.0, 5.0, 3.0, 0.5)
+                elif strategy_name == DUAL_MOMENTUM_LABEL:
+                    params["lookback"] = st.number_input("Lookback (trading days)", 10, 252, 126)
+                    benchmark = st.text_input("Benchmark ticker", BENCHMARK_TICKER).strip().upper()
+                    params["benchmark_ticker"] = benchmark or BENCHMARK_TICKER
 
             run_backtest = tab_choice not in ("Compare", "Saved Runs", "Best Strategy")
 
@@ -844,7 +888,8 @@ def main():
                     try:
                         strategy_cls = STRATEGY_REGISTRY[strategy_name]
                         strategy = strategy_cls(**(params if params else STRATEGY_DEFAULTS[strategy_name]))
-                        feed = DataFeed(DEFAULT_DATA_DIR, tickers=tickers,
+                        feed_tickers = resolve_feed_tickers(strategy_name, list(tickers), params)
+                        feed = DataFeed(DEFAULT_DATA_DIR, tickers=feed_tickers,
                                         start_date=str(start), end_date=str(end))
 
                         if len(feed) == 0:

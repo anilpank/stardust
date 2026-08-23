@@ -41,7 +41,7 @@ The 4 built-in strategies are:
 | **ATR Trailing Stop** (20/14/3) | Buys on breakout, exits via volatility-adaptive trailing stop | Trending markets with volatility |
 | **Dual Momentum** (126d vs SPY) | Buys when a stock's 6-month return is positive AND beats SPY's | Stock-picking across full cycles |
 
-Note: Dual Momentum needs **SPY included in your ticker selection** — it compares each stock against SPY.
+Note: Dual Momentum compares each stock against SPY. In the **dashboard**, SPY is added automatically as the benchmark — no action needed. On the **command line**, include SPY in your ticker selection.
 
 You don't need to understand how these work — the system runs them automatically and tells you which performs best.
 
@@ -445,6 +445,8 @@ The sidebar adapts based on which tab you're on.
 | **Run Analysis** | Click this button to run the backtest. Results appear in the main area. |
 
 **For standalone tabs** (Data Explorer, Compare Tickers): The sidebar shows a tip to use the controls on the main page. All configuration is on the main page itself.
+
+**Note on Dual Momentum:** When you pick the **Dual Mom 126d** strategy (or run a comparison that includes it), SPY is added to the data automatically as its benchmark. You never need to select SPY yourself — it isn't tradable by the strategy and won't appear in your results; it's only used for the return comparison.
 
 ### Tab: Overview
 
