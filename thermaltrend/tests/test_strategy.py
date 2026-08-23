@@ -2,6 +2,7 @@
 
 from datetime import datetime
 
+import pandas as pd
 import pytest
 
 from thermaltrend.core.events import MarketEvent, SignalDirection
@@ -659,3 +660,258 @@ class TestATRTrailingStopStrategy:
             - s_calm._trailing_stop["CALM"]
         )
         assert volatile_dist > calm_dist
+
+
+def _run_dual(prices_by_ticker, strategy):
+    """Feed interleaved chronological bars through the strategy.
+
+    prices_by_ticker: dict of ticker -> list of closes (all same length).
+    Bars are fed date by date, tickers in sorted order per date.
+    """
+    signals = []
+    n_days = len(next(iter(prices_by_ticker.values())))
+    for day in range(n_days):
+        for ticker in sorted(prices_by_ticker.keys()):
+            close = prices_by_ticker[ticker][day]
+            event = _market(ticker, datetime(2026, 1, day + 1), close)
+            sig = strategy.on_market(event)
+            if sig is not None:
+                signals.append(sig)
+    return signals
+
+
+class TestDualMomentumStrategy:
+    def test_no_signal_before_warmup(self):
+        from thermaltrend.core.strategy import DualMomentumStrategy
+
+        s = DualMomentumStrategy(lookback=3)
+        # 3 days only — need lookback + 1 = 4 bars
+        prices = {
+            "SPY": [100.0, 100.0, 100.0],
+            "AAPL": [100.0, 105.0, 110.0],
+        }
+        signals = _run_dual(prices, s)
+        assert len(signals) == 0
+
+    def test_no_signal_without_benchmark(self):
+        from thermaltrend.core.strategy import DualMomentumStrategy
+
+        s = DualMomentumStrategy(lookback=3, benchmark_ticker="SPY")
+        # Benchmark never appears — strategy stays silent
+        prices = {"AAPL": [100.0, 105.0, 110.0, 120.0]}
+        signals = _run_dual(prices, s)
+        assert len(signals) == 0
+
+    def test_buy_on_positive_absolute_and_relative(self):
+        from thermaltrend.core.strategy import DualMomentumStrategy
+
+        s = DualMomentumStrategy(lookback=3)
+        # SPY flat → bench momentum = 0; AAPL rises → momentum > 0 and > bench.
+        # Note: bars are processed alphabetically per date, so SPY's same-day
+        # close arrives after AAPL is evaluated — first possible signal is day 5.
+        prices = {
+            "SPY": [100.0, 100.0, 100.0, 100.0, 100.0],
+            "AAPL": [100.0, 100.0, 100.0, 110.0, 111.0],
+        }
+        signals = _run_dual(prices, s)
+        assert len(signals) == 1
+        assert signals[0].direction == SignalDirection.BUY
+        assert signals[0].ticker == "AAPL"
+
+    def test_no_buy_when_absolute_momentum_fails(self):
+        from thermaltrend.core.strategy import DualMomentumStrategy
+
+        s = DualMomentumStrategy(lookback=3)
+        # Both fall, AAPL falls less (beats benchmark) but momentum < 0
+        prices = {
+            "SPY": [100.0, 95.0, 90.0, 85.0, 80.0],
+            "AAPL": [100.0, 97.0, 94.0, 92.0, 90.0],
+        }
+        signals = _run_dual(prices, s)
+        assert len(signals) == 0
+
+    def test_no_buy_when_relative_momentum_fails(self):
+        from thermaltrend.core.strategy import DualMomentumStrategy
+
+        s = DualMomentumStrategy(lookback=3)
+        # Both rise but SPY rises more — absolute passes, relative fails
+        prices = {
+            "SPY": [100.0, 102.0, 104.0, 106.0, 108.0],
+            "AAPL": [100.0, 101.0, 102.0, 103.0, 104.0],
+        }
+        signals = _run_dual(prices, s)
+        assert len(signals) == 0
+
+    def test_sell_when_absolute_momentum_fails(self):
+        from thermaltrend.core.strategy import DualMomentumStrategy
+
+        s = DualMomentumStrategy(lookback=3)
+        # Enter, then crash below zero → SELL
+        prices = {
+            "SPY": [100.0, 100.0, 100.0, 100.0, 100.0, 100.0],
+            "AAPL": [100.0, 100.0, 100.0, 110.0, 111.0, 60.0],
+        }
+        signals = _run_dual(prices, s)
+        assert len(signals) == 2
+        assert signals[0].direction == SignalDirection.BUY
+        assert signals[1].direction == SignalDirection.SELL
+        # Day 6: momentum = 60/100 - 1 = -0.40 ≤ 0. Benchmark is flat at 0,
+        # so a negative-momentum exit fails BOTH checks.
+        assert signals[1].metadata["absolute_pass"] is False
+        assert signals[1].metadata["relative_pass"] is False
+
+    def test_sell_when_relative_momentum_fails(self):
+        from thermaltrend.core.strategy import DualMomentumStrategy
+
+        s = DualMomentumStrategy(lookback=3)
+        # Enter, then SPY surges past AAPL while AAPL still positive → SELL.
+        # SPY's surge lands on day 6 but is only visible to AAPL's evaluation
+        # on day 7 (one-bar benchmark lag).
+        prices = {
+            "SPY": [100.0, 100.0, 100.0, 100.0, 100.0, 120.0, 120.0],
+            "AAPL": [100.0, 100.0, 100.0, 110.0, 112.0, 113.0, 114.0],
+        }
+        signals = _run_dual(prices, s)
+        assert len(signals) == 2
+        assert signals[0].direction == SignalDirection.BUY
+        assert signals[1].direction == SignalDirection.SELL
+        # Day 7: AAPL momentum = 114/100-1 = 0.14 > 0, SPY = 120/100-1 = 0.20
+        assert signals[1].metadata["absolute_pass"] is True
+        assert signals[1].metadata["relative_pass"] is False
+
+    def test_re_entry_after_exit(self):
+        from thermaltrend.core.strategy import DualMomentumStrategy
+
+        s = DualMomentumStrategy(lookback=3)
+        # Enter → exit (SPY surges past) → re-enter after strong recovery
+        prices = {
+            "SPY": [100.0] * 6 + [150.0] * 6,
+            "AAPL": [
+                100.0, 100.0, 100.0, 110.0, 112.0, 113.0,
+                114.0, 115.0, 300.0, 310.0, 320.0, 330.0,
+            ],
+        }
+        signals = _run_dual(prices, s)
+        directions = [sig.direction for sig in signals]
+        assert directions == [
+            SignalDirection.BUY,
+            SignalDirection.SELL,
+            SignalDirection.BUY,
+        ]
+
+    def test_benchmark_never_generates_signals(self):
+        from thermaltrend.core.strategy import DualMomentumStrategy
+
+        s = DualMomentumStrategy(lookback=3)
+        # SPY itself swings wildly — must never emit a signal
+        prices = {
+            "SPY": [100.0, 150.0, 50.0, 200.0],
+            "AAPL": [100.0, 100.0, 100.0, 100.0],
+        }
+        signals = _run_dual(prices, s)
+        assert all(sig.ticker != "SPY" for sig in signals)
+
+    def test_strength_bounded(self):
+        from thermaltrend.core.strategy import DualMomentumStrategy
+
+        s = DualMomentumStrategy(lookback=3)
+        # Massive outperformance → strength capped at 1.0
+        prices = {
+            "SPY": [100.0, 100.0, 100.0, 100.0, 100.0],
+            "AAPL": [100.0, 100.0, 100.0, 100.0, 500.0],
+        }
+        signals = _run_dual(prices, s)
+        assert len(signals) == 1
+        assert signals[0].strength == 1.0
+
+    def test_strength_floor(self):
+        from thermaltrend.core.strategy import DualMomentumStrategy
+
+        s = DualMomentumStrategy(lookback=3)
+        # Tiny outperformance → strength floored at 0.01
+        prices = {
+            "SPY": [100.0, 100.0, 100.0, 100.0, 100.0],
+            "AAPL": [100.0, 100.0, 100.0, 100.0, 100.001],
+        }
+        signals = _run_dual(prices, s)
+        assert len(signals) == 1
+        assert signals[0].strength >= 0.01
+
+    def test_strategy_id(self):
+        from thermaltrend.core.strategy import DualMomentumStrategy
+
+        s = DualMomentumStrategy(lookback=3, strategy_id="my_dual")
+        prices = {
+            "SPY": [100.0, 100.0, 100.0, 100.0, 100.0],
+            "AAPL": [100.0, 100.0, 100.0, 110.0, 111.0],
+        }
+        signals = _run_dual(prices, s)
+        assert signals[0].strategy_id == "my_dual"
+
+    def test_metadata_populated(self):
+        from thermaltrend.core.strategy import DualMomentumStrategy
+
+        s = DualMomentumStrategy(lookback=3)
+        prices = {
+            "SPY": [100.0, 100.0, 100.0, 100.0, 100.0],
+            "AAPL": [100.0, 100.0, 100.0, 110.0, 111.0],
+        }
+        signals = _run_dual(prices, s)
+        m = signals[0].metadata
+        assert "momentum" in m
+        assert "benchmark_momentum" in m
+        assert m["benchmark_ticker"] == "SPY"
+        assert m["lookback"] == 3
+        assert m["absolute_pass"] is True
+        assert m["relative_pass"] is True
+        assert abs(m["momentum"] - 0.11) < 1e-9
+        assert m["benchmark_momentum"] == 0.0
+
+    def test_independent_tickers(self):
+        from thermaltrend.core.strategy import DualMomentumStrategy
+
+        s = DualMomentumStrategy(lookback=3)
+        # AAPL beats SPY, MSFT lags SPY — only AAPL gets a BUY
+        prices = {
+            "SPY": [100.0, 102.0, 104.0, 106.0, 108.0],
+            "AAPL": [100.0, 105.0, 110.0, 115.0, 120.0],
+            "MSFT": [100.0, 101.0, 102.0, 103.0, 104.0],
+        }
+        signals = _run_dual(prices, s)
+        assert len(signals) == 1
+        assert signals[0].ticker == "AAPL"
+        assert signals[0].direction == SignalDirection.BUY
+
+    def test_engine_integration(self, tmp_path):
+        """Full integration: DataFeed → DataEngine → DualMomentumStrategy."""
+        from thermaltrend.core.engine import DataEngine
+        from thermaltrend.feed import DataFeed
+        from thermaltrend.core.strategy import DualMomentumStrategy
+
+        dates = pd.bdate_range("2026-01-01", periods=10)
+
+        def make_df(ticker, closes):
+            return pd.DataFrame(
+                {
+                    "Open": closes,
+                    "High": closes,
+                    "Low": closes,
+                    "Close": closes,
+                    "Volume": [1000] * len(closes),
+                    "ticker": ticker,
+                },
+                index=pd.DatetimeIndex(dates, name="Date"),
+            )
+
+        spy_closes = [100.0] * 10
+        aapl_closes = [100.0] * 7 + [110.0, 120.0, 130.0]
+        make_df("SPY", spy_closes).to_parquet(tmp_path / "SPY.parquet")
+        make_df("AAPL", aapl_closes).to_parquet(tmp_path / "AAPL.parquet")
+
+        feed = DataFeed(tmp_path)
+        engine = DataEngine(feed, DualMomentumStrategy(lookback=3))
+        signals = engine.run()
+
+        buys = [s for s in signals if s.direction == SignalDirection.BUY]
+        assert len(buys) >= 1
+        assert all(s.ticker == "AAPL" for s in signals)

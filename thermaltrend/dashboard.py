@@ -38,6 +38,7 @@ from thermaltrend.core.engine import DataEngine
 from thermaltrend.core.strategy import (
     ATRTrailingStopStrategy,
     DonchianBreakoutStrategy,
+    DualMomentumStrategy,
     MACrossoverStrategy,
     RSIMeanReversionStrategy,
 )
@@ -51,6 +52,7 @@ STRATEGY_REGISTRY = {
     "Donchian 20/10": DonchianBreakoutStrategy,
     "RSI 14": RSIMeanReversionStrategy,
     "ATR Trail 20/14/3": ATRTrailingStopStrategy,
+    "Dual Mom 126d": DualMomentumStrategy,
 }
 
 STRATEGY_DEFAULTS = {
@@ -58,6 +60,7 @@ STRATEGY_DEFAULTS = {
     "Donchian 20/10": {"entry_period": 20, "exit_period": 10},
     "RSI 14": {"period": 14, "oversold": 30.0, "overbought": 70.0},
     "ATR Trail 20/14/3": {"entry_period": 20, "atr_period": 14, "atr_multiple": 3.0},
+    "Dual Mom 126d": {"lookback": 126, "benchmark_ticker": "SPY"},
 }
 
 STRATEGY_DESCRIPTIONS = {
@@ -65,6 +68,7 @@ STRATEGY_DESCRIPTIONS = {
     "Donchian 20/10": "Buys when price breaks above the 20-day high. Sells when it drops below the 10-day low. Captures breakouts with quick exits.",
     "RSI 14": "Buys when RSI bounces off oversold (30). Sells when it drops from overbought (70). Best for range-bound markets.",
     "ATR Trail 20/14/3": "Buys on 20-day breakout, exits via ATR-based trailing stop that ratchets up. Lets winners run while protecting gains.",
+    "Dual Mom 126d": "Buys when a stock's 126-day return is positive AND beats SPY's return. Sells when either condition fails. Requires SPY in your ticker selection.",
 }
 
 ALL_TICKERS = sorted(p.stem for p in Path(DEFAULT_DATA_DIR).glob("*.parquet") if p.stem != "SPY")
@@ -590,7 +594,7 @@ def page_compare_tickers():
 
 def page_best_strategy(start: str, end: str):
     st.subheader("Best Strategy per Ticker (S&P 500)")
-    st.caption("Runs all 4 strategies on every S&P 500 constituent and shows which worked best for each ticker, compared against S&P 500 buy-and-hold returns.")
+    st.caption("Runs all registered strategies on every S&P 500 constituent and shows which worked best for each ticker, compared against S&P 500 buy-and-hold returns.")
 
     col1, col2, col3 = st.columns(3)
     with col1:

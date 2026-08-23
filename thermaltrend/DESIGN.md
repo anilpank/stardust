@@ -2,7 +2,7 @@
 
 **Author:** Anil
 **Date:** July 2026
-**Status:** Phase 2-3 Complete (Data Layer + Event Queue + Signal Generation + Analytics + Signal Persistence + Backtest/Compare CLI + 4 strategies)
+**Status:** Phase 2-3 Complete (Data Layer + Event Queue + Signal Generation + Analytics + Signal Persistence + Backtest/Compare CLI + 5 strategies)
 
 ---
 
@@ -44,7 +44,7 @@ Six layers, four built:
 |-------|--------|------|
 | Data Layer | Built | Download, update, inspect Parquet files; `DataFeed` yields chronological bars |
 | Event Queue | Built | `MarketEvent` → `SignalEvent` flow via `EventQueue`; `DataEngine` orchestrates |
-| Strategy Engine | 4 strategies built | `Strategy` ABC + `MACrossoverStrategy`, `DonchianBreakoutStrategy`, `RSIMeanReversionStrategy`, `ATRTrailingStopStrategy`; dual momentum, factor scoring planned |
+| Strategy Engine | 5 strategies built | `Strategy` ABC + `MACrossoverStrategy`, `DonchianBreakoutStrategy`, `RSIMeanReversionStrategy`, `ATRTrailingStopStrategy`, `DualMomentumStrategy`; factor scoring planned |
 | Analytics & Reporting | Built | Trade simulation, metrics, regime analysis, strategy ranking, benchmark comparison |
 | Execution Handler | Planned | Simulated fills, slippage models, live broker bridge |
 | Portfolio & Risk | Planned | Position sizing, risk rules, PnL tracking |

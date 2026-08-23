@@ -7,7 +7,7 @@ Event-driven backtesting system for trading strategies on S&P 500 equities. Test
 Python 3.12+ with the following packages:
 
 ```
-pip install pandas numpy yfinance requests pyarrow pytest pre-commit
+pip install pandas numpy yfinance requests pyarrow pytest pre-commit streamlit plotly
 ```
 
 ## Project Structure
@@ -16,7 +16,8 @@ pip install pandas numpy yfinance requests pyarrow pytest pre-commit
 thermaltrend/
 ├── core/                          # Event engine
 │   ├── events.py                  # MarketEvent, SignalEvent, EventQueue
-│   ├── strategy.py                # Strategy ABC + MACrossover, Donchian, RSI, ATR Trailing Stop
+│   ├── strategy.py                # Strategy ABC + MA Crossover, Donchian, RSI,
+│   │                              #   ATR Trailing Stop, Dual Momentum
 │   └── engine.py                  # DataEngine (main event loop)
 ├── analytics/                     # Strategy evaluation & comparison
 │   ├── trade_simulator.py         # SignalEvents → simulated trades (ATR stops, $10K sizing)
@@ -39,7 +40,10 @@ thermaltrend/
 ├── compare_cli.py                 # Compare multiple strategies (CLI + library)
 ├── signal_store.py                # Persist, query, and annotate signals
 ├── signals.py                     # Generate trading signals (with --save)
-└── tests/                         # 223 unit tests (19 test files)
+├── dashboard.py                   # Streamlit dashboard: backtests, signals, comparisons,
+│                                  #   Data Explorer, Compare Tickers
+├── charts.py                      # Plotly chart builders used by the dashboard
+└── tests/                         # 371 tests across 23 files (342 fast unit + 29 integration)
 ```
 
 ## Running Scripts
@@ -169,6 +173,9 @@ python -m thermaltrend.signals --strategy rsi_mean_reversion --tickers AAPL MSFT
 # Use ATR trailing stop strategy (Chandelier Exit)
 python -m thermaltrend.signals --strategy atr_trailing_stop --tickers AAPL MSFT
 
+# Use dual momentum strategy (include the benchmark SPY in your tickers)
+python -m thermaltrend.signals --strategy dual_momentum --tickers AAPL MSFT SPY
+
 # Filter by minimum strength and direction
 python -m thermaltrend.signals --min-strength 0.5 --direction BUY
 
@@ -176,13 +183,21 @@ python -m thermaltrend.signals --min-strength 0.5 --direction BUY
 python -m thermaltrend.signals --start 2024-01-01 --end 2024-12-31
 ```
 
-Available strategies: `ma_crossover`, `donchian`, `rsi_mean_reversion`, `atr_trailing_stop`
+Available strategies: `ma_crossover`, `donchian`, `rsi_mean_reversion`, `atr_trailing_stop`, `dual_momentum`
+
+Note: `dual_momentum` learns the benchmark series from the event stream — include `SPY` in your ticker list, otherwise it produces no signals.
 
 Library usage:
 
 ```python
 from thermaltrend.core.engine import DataEngine
-from thermaltrend.core.strategy import MACrossoverStrategy, DonchianBreakoutStrategy, RSIMeanReversionStrategy, ATRTrailingStopStrategy
+from thermaltrend.core.strategy import (
+    ATRTrailingStopStrategy,
+    DonchianBreakoutStrategy,
+    DualMomentumStrategy,
+    MACrossoverStrategy,
+    RSIMeanReversionStrategy,
+)
 from thermaltrend.feed import DataFeed
 
 feed = DataFeed("thermaltrend/data/equities", tickers=["AAPL", "MSFT"])
@@ -327,10 +342,20 @@ Event-driven design with 6 layers:
 
 1. **Data Layer** — download, update, inspect Parquet files + DataFeed
 2. **Event Queue** — MarketEvent → SignalEvent flow with strict chronological ordering
-3. **Strategy Engine** — Strategy ABC + 4 strategies: MA Crossover, Donchian Breakout, RSI Mean Reversion, ATR Trailing Stop
+3. **Strategy Engine** — Strategy ABC + 5 strategies: MA Crossover, Donchian Breakout, RSI Mean Reversion, ATR Trailing Stop, Dual Momentum
 4. **Analytics & Reporting** — Trade simulation, metrics, regime analysis, strategy ranking, signal persistence
 5. **Execution Handler** — simulated fills + live broker bridge (planned)
 6. **Portfolio & Risk** — position sizing, risk management (planned)
+
+## Dashboard
+
+A Streamlit dashboard wraps the full workflow in a point-and-click interface:
+
+```bash
+streamlit run thermaltrend/dashboard.py
+```
+
+Tabs: Overview (metric cards, equity curve, drawdown, P&L distribution, price & signals), Trades, Per-Ticker, Regime, Signals, Compare, Saved Runs, plus standalone Data Explorer and Compare Tickers pages. See `USER_GUIDE.md` Section 10 for a walkthrough.
 
 ## Running Tests
 

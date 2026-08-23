@@ -25,7 +25,7 @@ This guide walks you through setting up and using Thermaltrend — a system that
 
 Thermaltrend helps you answer three questions:
 
-1. **Which strategies have worked historically?** — Backtest 4 different strategies on any S&P 500 stock and see their performance metrics.
+1. **Which strategies have worked historically?** — Backtest 5 different strategies on any S&P 500 stock and see their performance metrics.
 2. **Which strategy works best right now?** — Compare strategies side-by-side and see which one has the best risk-adjusted returns.
 3. **What should I trade today?** — Generate ranked buy/sell signals based on validated strategies.
 
@@ -39,6 +39,9 @@ The 4 built-in strategies are:
 | **Donchian Breakout** (20/10) | Buys when price breaks above 20-day high | Breakout/trending markets |
 | **RSI Mean Reversion** (14) | Buys when stock is oversold and starts recovering | Sideways/choppy markets |
 | **ATR Trailing Stop** (20/14/3) | Buys on breakout, exits via volatility-adaptive trailing stop | Trending markets with volatility |
+| **Dual Momentum** (126d vs SPY) | Buys when a stock's 6-month return is positive AND beats SPY's | Stock-picking across full cycles |
+
+Note: Dual Momentum needs **SPY included in your ticker selection** — it compares each stock against SPY.
 
 You don't need to understand how these work — the system runs them automatically and tells you which performs best.
 
@@ -177,6 +180,7 @@ python thermaltrend/backtest.py --strategy ma_crossover --tickers AAPL MSFT --st
 | `--strategy donchian` | Donchian Channel Breakout (20/10) |
 | `--strategy rsi_mean_reversion` | RSI Mean Reversion (14-period) |
 | `--strategy atr_trailing_stop` | ATR Trailing Stop (20/14/3) |
+| `--strategy dual_momentum` | Dual Momentum (126d return vs SPY — include SPY in tickers) |
 
 ---
 
@@ -370,7 +374,7 @@ Run `python update_data.py` to make sure your data is current.
 
 ### "Unknown strategy" error
 
-Check the strategy name. Available: `ma_crossover`, `donchian`, `rsi_mean_reversion`, `atr_trailing_stop`
+Check the strategy name. Available: `ma_crossover`, `donchian`, `rsi_mean_reversion`, `atr_trailing_stop`, `dual_momentum`
 
 ### Signals seem wrong
 
@@ -505,7 +509,7 @@ Generate and save trading signals without leaving the browser.
 
 ### Tab: Compare
 
-Run all 4 strategies on your selected stocks and rank them.
+Run all 5 strategies on your selected stocks and rank them.
 
 1. Choose a metric to **Rank by** (Sharpe is the default — it's the best single measure of strategy quality)
 2. Click **Run Comparison**
