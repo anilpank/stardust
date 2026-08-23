@@ -6,6 +6,7 @@ Usage:
     python show_start_dates.py --sort start # Sort by start date (default)
     python show_start_dates.py --sort ticker# Sort by ticker
     python show_start_dates.py --csv out.csv # Export to CSV
+    python show_start_dates.py --data-dir ./my_data # Custom data directory
 """
 
 import argparse
@@ -23,9 +24,13 @@ def main():
         help="Sort by start date, ticker, or row count (default: start)",
     )
     parser.add_argument("--csv", default=None, help="Export results to CSV file")
+    parser.add_argument(
+        "--data-dir", default=str(DATA_DIR),
+        help="Directory containing Parquet files",
+    )
     args = parser.parse_args()
 
-    parquet_files = sorted(DATA_DIR.glob("*.parquet"))
+    parquet_files = sorted(Path(args.data_dir).glob("*.parquet"))
 
     results = []
     for f in parquet_files:
