@@ -16,6 +16,7 @@ data/equities/) is unaffected.
 Usage:
     python download_removed.py                # download all removed members
     python --tickers AAL ESRT                 # download specific tickers
+    python --tickers AAL --output ./my_data   # custom output directory
 """
 
 import argparse
@@ -83,7 +84,15 @@ def main():
     parser.add_argument(
         "--workers", type=int, default=8, help="Parallel download workers (default: 8)",
     )
+    parser.add_argument(
+        "--output", default=None,
+        help="Output directory for removed-ticker parquets (default: data/equities_removed/)",
+    )
     args = parser.parse_args()
+
+    global REMOVED_DIR
+    if args.output:
+        REMOVED_DIR = Path(args.output)
 
     tickers = removed_tickers() if not args.tickers else args.tickers
     if not tickers:

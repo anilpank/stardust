@@ -49,7 +49,7 @@ thermaltrend/
 ├── dashboard.py                   # Streamlit dashboard: backtests, signals, comparisons,
 │                                  #   Data Explorer, Compare Tickers
 ├── charts.py                      # Plotly chart builders used by the dashboard
-└── tests/                         # 388 tests across 24 files (360 fast unit + 28 integration)
+└── tests/                         # 426 tests across 26 files (394 fast unit + 32 integration)
 ```
 
 ## Running Scripts

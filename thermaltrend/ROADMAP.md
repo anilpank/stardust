@@ -28,7 +28,7 @@ Working pipeline: **DataFeed → DataEngine → Strategy → SignalEvents → Tr
 | Portfolio & Risk | Not built |
 | Execution Handler | Not built |
 
-Source: ~4,800 lines across 22 modules. Tests: ~5,300 lines across 24 files (388 tests; 360 fast unit + 28 integration).
+Source: ~4,800 lines across 22 modules. Tests: ~6,100 lines across 26 files (426 tests; 394 fast unit + 32 integration).
 
 ---
 
