@@ -195,7 +195,7 @@ Thermaltrend fixes this with a **point-in-time universe** (`--universe point_in_
 python thermaltrend/backtest.py --strategy ma_crossover --universe point_in_time --start 2010-01-01
 ```
 
-Use this for any backtest that starts before today's date. It uses the `membership.csv` table that ships with the project (no extra setup needed).
+Use this for any backtest that starts before today's date. It uses the `membership.csv` table that ships with the project (no extra setup needed). When reading results, remember that stocks removed from the index long ago often have no price history — those positions are closed at the assumed delisting return above, so point-in-time numbers are a fair, conservative estimate, not a perfect reconstruction.
 
 ---
 
