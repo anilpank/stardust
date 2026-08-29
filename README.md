@@ -299,7 +299,32 @@ python thermaltrend/compare_cli.py --universe point_in_time --start 2010-01-01
 python thermaltrend/survivorship_bias.py
 # Bias-corrected estimate (adds removed-but-still-traded members)
 python thermaltrend/survivorship_bias.py --include-removed
+# Single start year / per-ticker table
+python thermaltrend/survivorship_bias.py --start-year 2010 --csv survivors.csv
 ```
+
+### Survivorship-Bias Data Tooling
+
+These scripts prepare and audit the data that makes the point-in-time universe possible. They are developer tools — they only need to be re-run when membership or removed-ticker data changes, not on a daily basis:
+
+```bash
+cd thermaltrend
+
+# 1. Rebuild membership.csv (source of truth for --universe point_in_time)
+#    --refresh re-downloads the Wikipedia/fja source files (network needed)
+python build_membership.py --refresh
+
+# 2. Backfill price data for removed S&P 500 members (parallel, resumable) *
+python download_removed.py                # all pending removed members (8 workers)
+python download_removed.py --tickers AAL MER   # specific tickers
+python download_removed.py --workers 4        # tune parallelism
+python download_removed.py --output ./my_data # custom output directory
+
+# 3. Per-stint data coverage report (full / partial / none over the removal window)
+python removed_coverage.py
+```
+
+* `download_removed.py` writes to `data/equities_removed/` (never `data/equities/`), so daily `update_data.py` runs and the `--universe point_in_time` reader are both unaffected.
 
 With the point-in-time universe the residual equal-weight bias drops to roughly **+0.9%/yr (2010)** and **+0.5%/yr (2015)**; the remaining 2020 residual (−0.4%/yr) is tied to cap-weight differences. About 60% of removed stints (456 of 756) have no price history at all — the delisting-return assumption covers those. The dashboard exposes the same switch via the **Universe** selector in the sidebar.
 
