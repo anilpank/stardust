@@ -21,7 +21,7 @@ The data pipeline, event-driven engine, and analytics module are built. Data is 
 | Columns | Open, High, Low, Close, Volume (auto-adjusted) |
 | Strategies | 5 (MA Crossover, Donchian Breakout, RSI Mean Reversion, ATR Trailing Stop, Dual Momentum) |
 | Total source code | ~4,800 lines across 22 modules |
-| Total test code | ~5,300 lines across 24 test files (388 tests: 360 fast unit + 28 integration) |
+| Total test code | ~6,100 lines across 26 test files (426 tests: 394 fast unit + 32 integration) |
 | Git commits | 66 |
 
 ## Scripts
@@ -31,7 +31,7 @@ The data pipeline, event-driven engine, and analytics module are built. Data is 
 | `download_data.py` | Full download from Yahoo Finance (skips existing) | `cd thermaltrend && python download_data.py` |
 | `update_data.py` | Incremental update (downloads only missing days) | `cd thermaltrend && python update_data.py` |
 | `build_membership.py` | Build `membership.csv` (point-in-time membership stints) | `cd thermaltrend && python build_membership.py --refresh` |
-| `download_removed.py` | Backfill Yahoo data for removed S&P 500 members (parallel, resumable) | `cd thermaltrend && python download_removed.py` |
+| `download_removed.py` | Backfill Yahoo data for removed S&P 500 members (parallel, resumable; `--output` for custom dir) | `cd thermaltrend && python download_removed.py` |
 | `removed_coverage.py` | Per-stint data coverage report for removed members | `cd thermaltrend && python removed_coverage.py` |
 | `survivorship_bias.py` | Quantify survivorship bias vs real index; `--include-removed` for PIT estimate | `cd thermaltrend && python survivorship_bias.py [--include-removed]` |
 | `show_start_dates.py` | Inspect data availability per ticker | `cd thermaltrend && python show_start_dates.py` |
@@ -177,12 +177,14 @@ python -m thermaltrend.signals --strategy atr_trailing_stop --tickers AAPL MSFT 
 python -m thermaltrend.signals --strategy dual_momentum --tickers AAPL MSFT SPY --start 2024-01-01
 ```
 
-Test files (24 files, 388 tests: 360 fast unit + 28 integration):
+Test files (26 files, 426 tests: 394 fast unit + 32 integration):
 - `tests/test_events.py` — EventQueue, MarketEvent, SignalEvent
 - `tests/test_strategy.py` — all 5 strategies incl. DualMomentumStrategy
 - `tests/test_engine.py` — DataEngine integration
 - `tests/test_feed.py` / `test_feed_integration.py` — DataFeed loading + real-data checks
 - `tests/test_pit_universe.py` — membership masking, `universe_exit` / Shumway `delisted` force-closes, PIT CLI runs
+- `tests/test_membership_tools.py` — build_membership / download_removed / removed_coverage / survivorship_bias logic
+- `tests/test_download_removed_integration.py` — removed-member downloader (slow, Yahoo network, `--output` fixtures)
 - `tests/test_signals.py` — signals.py CLI + formatting
 - `tests/test_trade_simulator.py` — Trade simulation with ATR stops
 - `tests/test_metrics.py` — Metric calculations, confidence, benchmark, per-period
@@ -277,7 +279,7 @@ pip install pandas numpy yfinance requests pyarrow pytest pre-commit
 ## If Starting a New Session
 
 - Run `git log --oneline -5` to see recent commits
-- Run `pytest thermaltrend/tests/ -m "not slow" -v` to confirm tests pass (360 fast unit tests, 28 integration deselected)
+- Run `pytest thermaltrend/tests/ -m "not slow" -v` to confirm tests pass (394 fast unit tests, 32 integration deselected)
 - If resuming after a break, run `python thermaltrend/update_data.py` to refresh all 502 equity parquet files (last full update: Aug 28 2026)
 - Run `python thermaltrend/update_data.py --tickers AAPL` to verify the data pipeline works
 - Run `streamlit run thermaltrend/dashboard.py` and try the Compare tab (Dual Momentum should appear with SPY auto-added); switch the sidebar **Universe** selector to Point-in-time
