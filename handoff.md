@@ -11,17 +11,18 @@ An early-stage Python project called **Thermaltrend** — an event-driven backte
 
 ## Current State
 
-The data pipeline, event-driven engine, and analytics module are built. Data is stored as individual Parquet files in `thermaltrend/data/equities/` (501 S&P 500 tickers + SPY). A `DataFeed` class loads these files and yields bars in strict chronological order. The `EventQueue` processes MarketEvents through a Strategy to produce SignalEvents. The analytics module converts signals into simulated trades, computes performance metrics (CAGR, Sharpe, Sortino, MaxDD, win rate, confidence), and produces ranking tables with SPY buy-and-hold benchmark.
+The data pipeline, event-driven engine, and analytics module are built. Data is stored as individual Parquet files in `thermaltrend/data/equities/` (S&P 500 tickers + SPY) and `thermaltrend/data/equities_removed/` (survivorship-bias backfill for removed members). A `DataFeed` class loads these files and yields bars in strict chronological order. The `EventQueue` processes MarketEvents through a Strategy to produce SignalEvents. The analytics module converts signals into simulated trades, computes performance metrics (CAGR, Sharpe, Sortino, MaxDD, win rate, confidence), and produces ranking tables with SPY buy-and-hold benchmark. Backtests can run on a **point-in-time universe** (`--universe point_in_time`) that restricts each ticker to its actual S&P 500 membership window.
 
 | Metric | Value |
 |--------|-------|
-| Parquet files | 502 (501 S&P 500 tickers + SPY) |
-| Data range | 1970 → Jul 19 2026 (varies by ticker) |
+| Parquet files | 760 (502 in `data/equities/` = 501 S&P members + SPY; 258 in `data/equities_removed/`) |
+| Membership stints | 1,259 rows / 1,206 tickers in `data/equities/membership.csv` (503 current, 756 removed) |
+| Data range | 1970 → Aug 28 2026 (varies by ticker) |
 | Columns | Open, High, Low, Close, Volume (auto-adjusted) |
 | Strategies | 5 (MA Crossover, Donchian Breakout, RSI Mean Reversion, ATR Trailing Stop, Dual Momentum) |
 | Total source code | ~4,800 lines across 22 modules |
-| Total test code | ~5,200 lines across 24 test files (377 tests: 349 fast unit + 28 integration) |
-| Git commits | 55 |
+| Total test code | ~5,300 lines across 24 test files (388 tests: 360 fast unit + 28 integration) |
+| Git commits | 66 |
 
 ## Scripts
 
@@ -29,11 +30,15 @@ The data pipeline, event-driven engine, and analytics module are built. Data is 
 |--------|---------|-----|
 | `download_data.py` | Full download from Yahoo Finance (skips existing) | `cd thermaltrend && python download_data.py` |
 | `update_data.py` | Incremental update (downloads only missing days) | `cd thermaltrend && python update_data.py` |
+| `build_membership.py` | Build `membership.csv` (point-in-time membership stints) | `cd thermaltrend && python build_membership.py --refresh` |
+| `download_removed.py` | Backfill Yahoo data for removed S&P 500 members (parallel, resumable) | `cd thermaltrend && python download_removed.py` |
+| `removed_coverage.py` | Per-stint data coverage report for removed members | `cd thermaltrend && python removed_coverage.py` |
+| `survivorship_bias.py` | Quantify survivorship bias vs real index; `--include-removed` for PIT estimate | `cd thermaltrend && python survivorship_bias.py [--include-removed]` |
 | `show_start_dates.py` | Inspect data availability per ticker | `cd thermaltrend && python show_start_dates.py` |
 | `feed.py` | Load Parquet files as chronological bars (CLI + library) | `cd thermaltrend && python feed.py` |
 | `signals.py` | Generate trading signals from strategy (with --save) | `cd thermaltrend && python -m thermaltrend.signals --strategy ma_crossover\|donchian\|rsi_mean_reversion\|atr_trailing_stop\|dual_momentum` |
-| `backtest.py` | Backtest a single strategy with full metrics | `cd thermaltrend && python thermaltrend/backtest.py --strategy ma_crossover --ticker AAPL --start 2023-01-01` |
-| `compare_cli.py` | Compare multiple strategies side-by-side | `cd thermaltrend && python thermaltrend/compare_cli.py --tickers AAPL MSFT --start 2023-01-01` |
+| `backtest.py` | Backtest a single strategy with full metrics (`--universe current\|point_in_time`) | `cd thermaltrend && python thermaltrend/backtest.py --strategy ma_crossover --ticker AAPL --start 2023-01-01` |
+| `compare_cli.py` | Compare multiple strategies side-by-side (`--universe current\|point_in_time`) | `cd thermaltrend && python thermaltrend/compare_cli.py --tickers AAPL MSFT --start 2023-01-01` |
 | `signal_store.py` | Persist, query, and annotate signals | `cd thermaltrend && python thermaltrend/signal_store.py list` |
 | `dashboard.py` | Streamlit visual dashboard (run from repo root) | `streamlit run thermaltrend/dashboard.py` |
 
@@ -72,6 +77,21 @@ print(format_period_table(period_m, "MA Crossover", "monthly"))
 # Cross-strategy period comparison
 print(format_cross_strategy_period_table(strategy_results, period="quarterly"))
 ```
+
+## Point-in-Time Universe & Survivorship Bias
+
+Backtesting only today's members overstates historical returns (delisted losers are missing). `survivorship_bias.py` measured this at **~2.6–4.3%/yr** on an equal-weight S&P portfolio vs the real equal-weight index (RSP). Steps taken to fix it:
+
+**Step 2 — `membership.csv` (`build_membership.py`):** a per-stint membership table, 1,259 rows across 1,206 tickers, spanning 1957 → present. Columns: `ticker, date_added, date_removed, is_current`. Source files (Wikipedia snapshots + historic add/remove histories) live in the git-ignored `data/membership/`; rebuild with `build_membership.py --refresh` (network required). Only the merged `membership.csv` is committed.
+
+**Step 3 — removed-member data (`download_removed.py`):** backfilled price history for the 703 tickers in membership but not in today's S&P 500, saved to `data/equities_removed/` (git-ignored `data/benchmarks/` holds the RSP/SPY reference series used by `survivorship_bias.py`). Downloader runs a `ThreadPoolExecutor(max_workers=8)` in parallel, resumes incrementally, and accepts `--workers`. Results: **259 recovered** (258 kept — the smoke-test download ESRT had no membership row and was deleted), 445 genuinely delisted with no data (e.g. ENRNQ, LEHMQ, WCOEQ, MER, JCP, KM). `removed_coverage.py` reports per-stint coverage: **155 full / 145 partial / 456 none** over 756 removed stints — only 39.7% of removed stints have any data.
+
+**Step 4 — PIT engine integration:** `--universe current|point_in_time` on `backtest.py` and `compare_cli.py`, plus a **Universe** selector in the `dashboard.py` sidebar (`st.session_state["universe"]`). With `point_in_time`:
+- `DataFeed(membership=..., removed_data_dir=...)` masks each ticker to its membership window, merging its removed-period data from `equities_removed/`; non-members (SPY) pass through unmasked so the Dual Momentum benchmark is unaffected.
+- `TradeSimulator` gains two exit reasons: `universe_exit` (position force-closed at the last member-day close) and `delisted` (last close × a Shumway-style delisting return, **default −0.30**, applied when the ticker's data ends more than `max_delisting_gap_days` = 10 days before its membership window).
+- With removed data included, the residual bias collapses: 2005 **+1.20%/yr**, 2010 **+0.87%/yr**, 2015 **+0.47%/yr**, 2020 **−0.44%/yr**. Surviving members still beat the equal-weight index roughly by the survivorship premium; the 2020 residual reflects cap-weight differences vs RSP.
+
+Caveat: `update_data.py` only refreshes `data/equities/` — removed-member files are static until you re-run `download_removed.py`.
 
 ## Analytics Usage
 
@@ -128,6 +148,11 @@ python thermaltrend/backtest.py --strategy rsi_mean_reversion --ticker AAPL --pa
 python thermaltrend/compare_cli.py --tickers AAPL MSFT GOOGL --start 2023-01-01
 python thermaltrend/compare_cli.py --strategies ma_crossover donchian --ticker AAPL --sort-by sharpe
 
+# Point-in-time universe (survivorship-bias free)
+python thermaltrend/backtest.py --strategy ma_crossover --universe point_in_time --start 2010-01-01
+python thermaltrend/compare_cli.py --universe point_in_time --start 2010-01-01
+python thermaltrend/survivorship_bias.py --include-removed
+
 # Signal persistence
 python thermaltrend/signals.py --strategy ma_crossover --tickers AAPL --save
 python thermaltrend/signal_store.py list
@@ -152,11 +177,12 @@ python -m thermaltrend.signals --strategy atr_trailing_stop --tickers AAPL MSFT 
 python -m thermaltrend.signals --strategy dual_momentum --tickers AAPL MSFT SPY --start 2024-01-01
 ```
 
-Test files (24 files, 377 tests):
+Test files (24 files, 388 tests: 360 fast unit + 28 integration):
 - `tests/test_events.py` — EventQueue, MarketEvent, SignalEvent
 - `tests/test_strategy.py` — all 5 strategies incl. DualMomentumStrategy
 - `tests/test_engine.py` — DataEngine integration
 - `tests/test_feed.py` / `test_feed_integration.py` — DataFeed loading + real-data checks
+- `tests/test_pit_universe.py` — membership masking, `universe_exit` / Shumway `delisted` force-closes, PIT CLI runs
 - `tests/test_signals.py` — signals.py CLI + formatting
 - `tests/test_trade_simulator.py` — Trade simulation with ATR stops
 - `tests/test_metrics.py` — Metric calculations, confidence, benchmark, per-period
@@ -197,6 +223,12 @@ Pre-commit hook: `.pre-commit-config.yaml` runs `pytest -m "not slow" -q` on eve
 | `thermaltrend/DESIGN.md` | Design document with all design decisions |
 | `thermaltrend/ARCHITECTURE.md` | Detailed architecture proposal for the full system (6 layers) |
 | `thermaltrend/data/equities/constituents.csv` | S&P 500 member list with `date_added` for universe filtering |
+| `thermaltrend/data/equities/membership.csv` | Point-in-time membership stints (source of truth for `--universe point_in_time`) |
+| `thermaltrend/data/equities_removed/` | Parquet files for removed S&P 500 members (survivorship-bias backfill) |
+| `thermaltrend/build_membership.py` | `membership.csv` generator (raw sources in git-ignored `data/membership/`) |
+| `thermaltrend/download_removed.py` | Parallel, resumable removed-member data backfill (`data/equities_removed/`) |
+| `thermaltrend/removed_coverage.py` | Per-stint data coverage report for removed members |
+| `thermaltrend/survivorship_bias.py` | Survivorship-bias quantification (EqualWeight vs RSP/SPY; `--include-removed` for PIT) |
 | `pyproject.toml` | Minimal — only defines pytest `slow` marker |
 | `.pre-commit-config.yaml` | Pre-commit hook for unit tests |
 
@@ -215,6 +247,12 @@ Pre-commit hook: `.pre-commit-config.yaml` runs `pytest -m "not slow" -q` on eve
 6. **Bars are processed alphabetically per date:** The engine yields same-day bars in ticker-alphabetical order. A strategy comparing two tickers (e.g., Dual Momentum vs SPY) only sees the benchmark's *previous* close when evaluating a ticker earlier in the alphabet — a one-day lookback lag, not lookahead bias. Dual Momentum tests rely on this behavior; don't "fix" it casually.
 
 7. **Dual Momentum silently no-ops without benchmark bars:** If SPY (or the configured `benchmark_ticker`) isn't in the feed, the strategy emits zero signals instead of erroring. The dashboard guards against this via `resolve_feed_tickers()`; CLI users must include SPY themselves.
+
+8. **`update_data.py` ignores removed-member data:** It only syncs `data/equities/`, so removed-member files in `data/equities_removed/` go stale. If you need fresher removed-member prices, re-run `download_removed.py`.
+
+9. **Membership sources are not committed:** The raw Wikipedia snapshots / add-remove histories in `data/membership/` and the benchmark series in `data/benchmarks/` are git-ignored. Only the merged `membership.csv` and parquet files are committed; rebuild membership with `build_membership.py --refresh` (network needed).
+
+10. **Two current constituents have no data:** `constituents.csv` lists 503 members but 2 (FDXF, HONA — brand-new additions with no trading history yet) have no downloadable price data, so `data/equities/` holds 501 member parquets + SPY.
 
 ## Architecture Vision (from ARCHITECTURE.md)
 
@@ -239,12 +277,14 @@ pip install pandas numpy yfinance requests pyarrow pytest pre-commit
 ## If Starting a New Session
 
 - Run `git log --oneline -5` to see recent commits
-- Run `pytest thermaltrend/tests/ -m "not slow" -v` to confirm tests pass (349 fast unit tests)
-- If resuming after a break, run `python thermaltrend/update_data.py` to refresh all 502 parquet files (last full update: Jul 19 2026)
+- Run `pytest thermaltrend/tests/ -m "not slow" -v` to confirm tests pass (360 fast unit tests, 28 integration deselected)
+- If resuming after a break, run `python thermaltrend/update_data.py` to refresh all 502 equity parquet files (last full update: Aug 28 2026)
 - Run `python thermaltrend/update_data.py --tickers AAPL` to verify the data pipeline works
-- Run `streamlit run thermaltrend/dashboard.py` and try the Compare tab (Dual Momentum should appear with SPY auto-added)
+- Run `streamlit run thermaltrend/dashboard.py` and try the Compare tab (Dual Momentum should appear with SPY auto-added); switch the sidebar **Universe** selector to Point-in-time
 - Run `python thermaltrend/feed.py` to verify the data feed loads correctly
 - Run `python -m thermaltrend.signals --tickers AAPL MSFT --start 2024-01-01` to verify signal generation works
+- Run `python thermaltrend/backtest.py --strategy ma_crossover --ticker AAL --universe point_in_time --start 2015-01-01` — AAL should trade only during its 2015-03-23 → 2024-09-23 membership stint
+- Run `python thermaltrend/survivorship_bias.py --include-removed` to see the PIT-correction numbers
 - Try the backtest:
 
 ```bash

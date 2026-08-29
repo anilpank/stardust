@@ -21,11 +21,14 @@ Working pipeline: **DataFeed → DataEngine → Strategy → SignalEvents → Tr
 | Compare CLI (`compare_cli.py`) | Built |
 | Signal Persistence (`signal_store.py`) | Built |
 | Per-Period Breakdown (monthly/quarterly/yearly) | Built |
-| Streamlit Dashboard (`dashboard.py` + `charts.py`) | Built (Dual Momentum supported — benchmark auto-injected via `resolve_feed_tickers()`) |
+| Streamlit Dashboard (`dashboard.py` + `charts.py`) | Built (Dual Momentum supported — benchmark auto-injected via `resolve_feed_tickers()`); Universe selector in sidebar |
+| Point-in-Time Universe (`--universe point_in_time` + `membership.csv`) | Built (restricts trades to actual S&P 500 membership windows) |
+| Removed-Member Data (`data/equities_removed/` + `download_removed.py`) | Built (258 removed members backfilled; 445 genuinely delisted) |
+| Survivorship-Bias Tooling (`survivorship_bias.py`, `removed_coverage.py`) | Built (bias ~2.6–4.3%/yr survivors-only; ±<1%/yr residual with PIT) |
 | Portfolio & Risk | Not built |
 | Execution Handler | Not built |
 
-Source: ~4,800 lines across 22 modules. Tests: ~5,200 lines across 24 files (377 tests; 349 fast unit + 28 integration).
+Source: ~4,800 lines across 22 modules. Tests: ~5,300 lines across 24 files (388 tests; 360 fast unit + 28 integration).
 
 ---
 
@@ -46,16 +49,21 @@ thermaltrend/analytics/
 - 2× ATR (14-day) stop loss, configurable
 - Entry/exit at next day's open (no lookahead bias)
 - Unmatched BUYs closed at last price, flagged as `data_end`
+- Point-in-time universe: positions force-closed at the member's last S&P 500 day (`universe_exit`) or at a Shumway-style delisting return (−30% default) when price data runs out before removal (`delisted`, `max_delisting_gap_days` default 10)
 - Per-ticker performance breakdown
 - Market regime analysis (BULL/BEAR/SIDEWAYS)
 - Confidence score (0.0–1.0) based on sample size, consistency, ticker diversity
 - SPY buy-and-hold benchmark comparison
 
 **CLI tools:**
-- `backtest.py` — single-strategy backtest with metrics, per-ticker breakdown, regime analysis, JSON/CSV export
-- `compare_cli.py` — multi-strategy comparison with ranking table and SPY benchmark
+- `backtest.py` — single-strategy backtest with metrics, per-ticker breakdown, regime analysis, JSON/CSV export; `--universe current|point_in_time`
+- `compare_cli.py` — multi-strategy comparison with ranking table and SPY benchmark; `--universe current|point_in_time`
 - `signal_store.py` — list, show, annotate, and query saved signal runs
 - `signals.py --save` — persist signals directly from the signal generation tool
+- `build_membership.py` — rebuild `membership.csv` (point-in-time member stints)
+- `download_removed.py` — backfill price data for removed S&P 500 members (parallel, resumable)
+- `removed_coverage.py` — per-stint data coverage report for removed members
+- `survivorship_bias.py` — quantify survivorship bias vs the real equal-weight index (`--include-removed` for the PIT estimate)
 
 ---
 
@@ -144,6 +152,9 @@ Phase 3a (done)     →  per-period breakdown (monthly/quarterly/yearly) in metr
 Phase 3b (done)     →  Streamlit dashboard (dashboard.py, charts.py): Overview, Trades, Per-Ticker,
                        Regime, Signals, Compare, Saved Runs, Data Explorer, Compare Tickers tabs;
                        Dual Momentum fully supported (SPY benchmark auto-injected into every feed)
+Phase 3c (done)     →  survivorship-bias correction: membership.csv + data/equities_removed/ +
+                       --universe point_in_time (Shumway delisting exits; bias quantified
+                       ~2.6–4.3%/yr survivors-only → ±<1%/yr residual with PIT universe)
 Phase 4 (next)      →  portfolio/ package (position sizing, PnL)
 Phase 5 (later)     →  execution/ (OrderEvent, FillEvent, simulated fills)
 Phase 6 (future)    →  live broker bridge

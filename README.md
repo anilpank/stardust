@@ -28,22 +28,28 @@ thermaltrend/
 ├── data/
 │   ├── equities/                  # Parquet files for each S&P 500 ticker + SPY
 │   │   ├── constituents.csv       # S&P 500 members with date added
+│   │   ├── membership.csv         # Point-in-time membership stints (1957 → present)
 │   │   ├── AAPL.parquet
 │   │   └── ...
+│   ├── equities_removed/          # Parquet files for removed S&P 500 members (survivorship-bias fix)
 │   ├── signals/                   # Saved signal runs (one Parquet per run)
 │   └── actions/                   # Action annotations (acted/skipped/pending)
 ├── download_data.py               # Download OHLCV data from Yahoo Finance
 ├── update_data.py                 # Incrementally update existing Parquet files
+├── build_membership.py            # Build membership.csv (point-in-time membership stints)
+├── download_removed.py            # Backfill price data for removed S&P 500 members
+├── removed_coverage.py            # Per-stint data coverage report for removed members
+├── survivorship_bias.py           # Quantify survivorship bias (--include-removed = PIT universe)
 ├── show_start_dates.py            # Show data availability per company
 ├── feed.py                        # Data feed: load Parquet files as chronological bars
-├── backtest.py                    # Backtest a single strategy (CLI + library)
-├── compare_cli.py                 # Compare multiple strategies (CLI + library)
+├── backtest.py                    # Backtest a single strategy (CLI + library, --universe)
+├── compare_cli.py                 # Compare multiple strategies (CLI + library, --universe)
 ├── signal_store.py                # Persist, query, and annotate signals
 ├── signals.py                     # Generate trading signals (with --save)
 ├── dashboard.py                   # Streamlit dashboard: backtests, signals, comparisons,
 │                                  #   Data Explorer, Compare Tickers
 ├── charts.py                      # Plotly chart builders used by the dashboard
-└── tests/                         # 377 tests across 24 files (349 fast unit + 28 integration)
+└── tests/                         # 388 tests across 24 files (360 fast unit + 28 integration)
 ```
 
 ## Running Scripts
@@ -232,6 +238,9 @@ python thermaltrend/backtest.py --strategy ma_crossover --ticker AAPL --params '
 # Include regime analysis
 python thermaltrend/backtest.py --strategy rsi_mean_reversion --ticker AAPL --regime
 
+# Point-in-time universe (fixes survivorship bias — see section below)
+python thermaltrend/backtest.py --strategy ma_crossover --universe point_in_time --start 2010-01-01
+
 # Export results to JSON
 python thermaltrend/backtest.py --strategy atr_trailing_stop --ticker AAPL --output result.json
 ```
@@ -258,6 +267,9 @@ python thermaltrend/compare_cli.py --strategies ma_crossover donchian --ticker A
 
 # Export ranking to CSV
 python thermaltrend/compare_cli.py --tickers AAPL MSFT --output ranking.csv
+
+# Point-in-time universe (fixes survivorship bias — see section below)
+python thermaltrend/compare_cli.py --universe point_in_time --start 2010-01-01
 ```
 
 Library usage:
@@ -268,6 +280,28 @@ from thermaltrend.compare_cli import run_compare
 ranking = run_compare(tickers=["AAPL", "MSFT", "GOOGL"], start_date="2023-01-01")
 print(ranking)
 ```
+
+### Point-in-Time Universe (Survivorship Bias)
+
+Backtesting only today's S&P 500 members overstates returns: members that underperformed and were removed from the index are missing, even though they were tradable during the backtest window. `survivorship_bias.py` quantifies this at roughly **+2.6–4.3%/yr** on an equal-weight S&P portfolio versus the real equal-weight index.
+
+The project fixes the bias two ways:
+
+1. **`membership.csv`** — a historical member-stint table (1,259 stints across 1,206 tickers, 1957 → present). With `--universe point_in_time`, each ticker is only traded during its actual membership window.
+2. **`data/equities_removed/`** — backfilled price data for 258 removed members (those still trading after leaving the index). When a member's price data runs out well before its removal date, the trade exits with a Shumway-style delisting return (−30% by default).
+
+```bash
+# Backtest with the point-in-time universe (default: current members only)
+python thermaltrend/backtest.py --strategy ma_crossover --universe point_in_time --start 2010-01-01
+python thermaltrend/compare_cli.py --universe point_in_time --start 2010-01-01
+
+# Quantify the bias itself (survivors-only vs the real RSP equal-weight index)
+python thermaltrend/survivorship_bias.py
+# Bias-corrected estimate (adds removed-but-still-traded members)
+python thermaltrend/survivorship_bias.py --include-removed
+```
+
+With the point-in-time universe the residual equal-weight bias drops to roughly **+0.9%/yr (2010)** and **+0.5%/yr (2015)**; the remaining 2020 residual (−0.4%/yr) is tied to cap-weight differences. About 60% of removed stints (456 of 756) have no price history at all — the delisting-return assumption covers those. The dashboard exposes the same switch via the **Universe** selector in the sidebar.
 
 ### Signal Store
 
@@ -355,7 +389,7 @@ A Streamlit dashboard wraps the full workflow in a point-and-click interface:
 streamlit run thermaltrend/dashboard.py
 ```
 
-Tabs: Overview (metric cards, equity curve, drawdown, P&L distribution, price & signals), Trades, Per-Ticker, Regime, Signals, Compare, Saved Runs, plus standalone Data Explorer and Compare Tickers pages. Dual Momentum is fully supported — SPY is auto-added as its benchmark. See `USER_GUIDE.md` Section 10 for a walkthrough.
+Tabs: Overview (metric cards, equity curve, drawdown, P&L distribution, price & signals), Trades, Per-Ticker, Regime, Signals, Compare, Saved Runs, plus standalone Data Explorer and Compare Tickers pages. Dual Momentum is fully supported — SPY is auto-added as its benchmark. A **Universe** selector in the sidebar switches between current-member and point-in-time universes. See `USER_GUIDE.md` Section 10 for a walkthrough.
 
 ## Running Tests
 
