@@ -182,6 +182,21 @@ python thermaltrend/backtest.py --strategy ma_crossover --tickers AAPL MSFT --st
 | `--strategy atr_trailing_stop` | ATR Trailing Stop (20/14/3) |
 | `--strategy dual_momentum` | Dual Momentum (126d return vs SPY — include SPY in tickers) |
 
+### Backtest With the Point-in-Time Universe (Survivorship-Bias Free)
+
+By default, backtests assume **today's** S&P 500 members were available for your whole date range. That's survivorship bias — the companies that failed and got removed from the index are missing, so average performance looks better than it really was.
+
+Thermaltrend fixes this with a **point-in-time universe** (`--universe point_in_time`):
+
+- Each stock is only traded during the years it was actually an S&P 500 member.
+- If a member's price data runs out well before its removal date, the position is closed at a realistic **delisting return** (−30% default) instead of bouncing back.
+
+```bash
+python thermaltrend/backtest.py --strategy ma_crossover --universe point_in_time --start 2010-01-01
+```
+
+Use this for any backtest that starts before today's date. It uses the `membership.csv` table that ships with the project (no extra setup needed).
+
 ---
 
 ## 5. Comparing Strategies
@@ -223,6 +238,14 @@ This shows a side-by-side quarterly comparison — the `*` marks the winner in e
 python thermaltrend/compare_cli.py --tickers AAPL MSFT --start 2023-01-01 --sort-by sharpe
 python thermaltrend/compare_cli.py --tickers AAPL MSFT --start 2023-01-01 --sort-by win_rate
 python thermaltrend/compare_cli.py --tickers AAPL MSFT --start 2023-01-01 --sort-by cagr
+```
+
+### Compare on the Point-in-Time Universe
+
+As with backtests (Section 4), add `--universe point_in_time` to avoid survivorship bias — each stock is only compared during the years it was actually an S&P 500 member, and delisted stocks exit at a realistic delisting return:
+
+```bash
+python thermaltrend/compare_cli.py --universe point_in_time --start 2010-01-01
 ```
 
 ---
@@ -441,6 +464,7 @@ The sidebar adapts based on which tab you're on.
 | **Strategy** | Pick which strategy to run. A plain-English description appears below. |
 | **Tickers** | Pick which stocks to analyze. Start typing to search (e.g., type "AAPL"). |
 | **Start / End** | Set the date range for your backtest. |
+| **Universe** | *Current members* (today's S&P 500) or *Point-in-time* (each stock is only traded during its actual S&P 500 membership). Choose **Point-in-time** for historic backtests to avoid survivorship bias. |
 | **Strategy Parameters** | Expand this to tweak strategy settings (e.g., change the RSI threshold). |
 | **Run Analysis** | Click this button to run the backtest. Results appear in the main area. |
 
@@ -596,10 +620,12 @@ python thermaltrend/backtest.py --strategy ma_crossover --ticker AAPL --start 20
 python thermaltrend/backtest.py --strategy donchian --tickers AAPL MSFT --per-ticker           # Per-stock breakdown
 python thermaltrend/backtest.py --strategy rsi_mean_reversion --ticker AAPL --regime           # By market condition
 python thermaltrend/backtest.py --strategy atr_trailing_stop --ticker AAPL --period monthly    # By time period
+python thermaltrend/backtest.py --strategy ma_crossover --universe point_in_time --start 2010-01-01  # Survivorship-bias free
 
 # === COMPARE ===
 python thermaltrend/compare_cli.py --tickers AAPL MSFT --start 2023-01-01                     # Which strategy wins?
 python thermaltrend/compare_cli.py --tickers AAPL MSFT --period quarterly                      # By quarter
+python thermaltrend/compare_cli.py --universe point_in_time --start 2010-01-01                 # Point-in-time universe
 
 # === SIGNALS ===
 python thermaltrend/signals.py --strategy ma_crossover --tickers AAPL --save                   # Save signals
