@@ -19,6 +19,7 @@ Usage:
     python survivorship_bias.py                          # all start years
     python survivorship_bias.py --start-year 2010         # single start year
     python survivorship_bias.py --csv survivors.csv      # per-ticker table
+    python survivorship_bias.py --include-removed        # add removed-but-traded names
 """
 
 import argparse
@@ -30,6 +31,7 @@ import yfinance as yf
 
 DATA_DIR = Path(__file__).parent / "data"
 EQUITIES_DIR = DATA_DIR / "equities"
+REMOVED_DIR = DATA_DIR / "equities_removed"
 BENCHMARK_DIR = DATA_DIR / "benchmarks"
 
 DEFAULT_START_YEARS = [1995, 2000, 2005, 2010, 2015, 2020]
@@ -40,10 +42,18 @@ def load_constituents() -> pd.DataFrame:
     return pd.read_csv(csv_path, parse_dates=["date_added"])
 
 
-def load_monthly_closes(tickers: list[str]) -> dict[str, pd.Series]:
+def load_membership() -> pd.DataFrame:
+    return pd.read_csv(
+        EQUITIES_DIR / "membership.csv", parse_dates=["date_added", "date_removed"]
+    )
+
+
+def load_monthly_closes(tickers: list[str], include_removed: bool = False) -> dict[str, pd.Series]:
     closes: dict[str, pd.Series] = {}
     for ticker in tickers:
         path = EQUITIES_DIR / f"{ticker}.parquet"
+        if include_removed and not path.exists():
+            path = REMOVED_DIR / f"{ticker}.parquet"
         if not path.exists():
             continue
         df = pd.read_parquet(path)
@@ -70,10 +80,27 @@ def equal_weight_series(
     closes: dict[str, pd.Series],
     start: pd.Timestamp,
     end: pd.Timestamp,
+    membership: pd.DataFrame | None = None,
 ) -> pd.Series:
-    """Monthly-rebalanced equal weight total return series across survivors."""
+    """Monthly-rebalanced equal weight total return series across members.
+
+    When membership is provided, each ticker only contributes while it was an
+    S&P 500 member (survivorship-bias-corrected universe).
+    """
     panel = pd.DataFrame(closes).loc[start:end]
-    rets = panel.pct_change().dropna(how="all")
+    if membership is not None:
+        active = pd.DataFrame(True, index=panel.index, columns=panel.columns)
+        for ticker in panel.columns:
+            rows = membership[membership["ticker"] == ticker]
+            inside = pd.Series(False, index=panel.index)
+            for _, r in rows.iterrows():
+                mask = panel.index >= r["date_added"]
+                if pd.notna(r["date_removed"]):
+                    mask &= panel.index <= r["date_removed"]
+                inside |= mask
+            active[ticker] = inside.values
+        panel = panel.where(active)
+    rets = panel.pct_change(fill_method=None).dropna(how="all")
     return rets.mean(axis=1, skipna=True)
 
 
@@ -88,7 +115,7 @@ def cagr(series: pd.Series, end: pd.Timestamp) -> float:
     return total ** (1 / years) - 1
 
 
-def analyze_year(year: int) -> dict:
+def analyze_year(year: int, include_removed: bool = False, membership: pd.DataFrame | None = None) -> dict:
     """Compare survivors-only portfolios against benchmarks for one start year."""
     constituents = load_constituents()
     start = pd.Timestamp(f"{year}-01-01")
@@ -100,6 +127,18 @@ def analyze_year(year: int) -> dict:
     closes = {t: s for t, s in closes.items() if t in covered}
 
     eq_rebalanced = equal_weight_series(closes, start, end)
+
+    all_members = set()
+    expanded_series = None
+    if include_removed and membership is not None:
+        active = membership[
+            (membership["date_added"] <= end)
+            & (membership["date_removed"].isna() | (membership["date_removed"] > start))
+        ]
+        all_members = set(active["ticker"])
+        expanded = load_monthly_closes(sorted(all_members), include_removed=True)
+        expanded_series = equal_weight_series(expanded, start, end, membership)
+        expanded_active = len(expanded)
 
     first = {}
     last = {}
@@ -127,8 +166,15 @@ def analyze_year(year: int) -> dict:
         cagr_bench = cagr(window, end)
         eq_reb = eq_rebalanced.loc[window_start:]
         cagr_survivors = cagr(eq_reb, end)
+        expanded_cagr = (
+            cagr(expanded_series.loc[window_start:], end)
+            if expanded_series is not None
+            else None
+        )
         bench_rows[symbol] = {
             "survivors_cagr": cagr_survivors,
+            "expanded_cagr": expanded_cagr,
+            "expanded_active": expanded_active,
             "index_cagr": cagr_bench,
             "gap": cagr_survivors - cagr_bench,
             "window_start": window_start,
@@ -176,6 +222,11 @@ def format_report(results: list[dict], csv_path: Path | None) -> str:
                 f"{b['index_cagr']:6.2%}  -> gap {b['gap']:+.2%}/yr "
                 f"(window from {b['window_start'].date()})"
             )
+            if b.get("expanded_cagr") is not None:
+                lines.append(
+                    f"  Expanded PIT universe, {b['expanded_active']} members with data (removed-but-traded included) CAGR : {b['expanded_cagr']:6.2%}  "
+                    f"(remaining gap to {symbol}: {b['expanded_cagr'] - b['index_cagr']:+.2%}/yr)"
+                )
         lines.append("")
 
     if csv_path:
@@ -202,10 +253,15 @@ def main():
     parser.add_argument(
         "--csv", default=None, help="Also write per-ticker survivors table to this CSV",
     )
+    parser.add_argument(
+        "--include-removed", action="store_true",
+        help="Also include removed-but-still-traded tickers (PIT universe)",
+    )
     args = parser.parse_args()
 
     years = [args.start_year] if args.start_year else DEFAULT_START_YEARS
-    results = [analyze_year(y) for y in years]
+    membership = load_membership() if args.include_removed else None
+    results = [analyze_year(y, include_removed=args.include_removed, membership=membership) for y in years]
     print(format_report(results, Path(args.csv) if args.csv else None))
 
 
