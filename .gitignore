@@ -216,3 +216,7 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Thermaltrend generated data caches (re-downloadable)
+thermaltrend/data/benchmarks/
+thermaltrend/data/membership/
