@@ -5,6 +5,7 @@ Usage:
     python thermaltrend/compare_cli.py --tickers AAPL MSFT GOOGL --start 2023-01-01
     python thermaltrend/compare_cli.py --strategies ma_crossover donchian --tickers AAPL MSFT
     python thermaltrend/compare_cli.py --tickers AAPL MSFT --sort-by sharpe --output ranking.csv
+    python thermaltrend/compare_cli.py --universe point_in_time --start 2010-01-01
 """
 
 import json
@@ -26,6 +27,10 @@ from thermaltrend.core.strategy import (
 from thermaltrend.feed import DataFeed
 
 DEFAULT_DATA_DIR = str(Path(__file__).parent / "data" / "equities")
+DEFAULT_REMOVED_DATA_DIR = str(Path(__file__).parent / "data" / "equities_removed")
+DEFAULT_MEMBERSHIP_PATH = str(Path(__file__).parent / "data" / "equities" / "membership.csv")
+
+UNIVERSE_CHOICES = ["current", "point_in_time"]
 
 STRATEGY_REGISTRY = {
     "ma_crossover": {"cls": MACrossoverStrategy, "label": "MA 50/200", "params": {}},
@@ -43,6 +48,7 @@ def run_compare(
     end_date: str | None = None,
     sort_by: str = "sharpe",
     data_dir: str = DEFAULT_DATA_DIR,
+    universe: str = "current",
 ) -> tuple[pd.DataFrame, dict[str, dict]]:
     """Run multi-strategy comparison. Library-friendly.
 
@@ -51,7 +57,18 @@ def run_compare(
     if strategy_names is None:
         strategy_names = list(STRATEGY_REGISTRY.keys())
 
-    feed = DataFeed(data_dir, tickers=tickers, start_date=start_date, end_date=end_date)
+    feed_kwargs = dict(
+        data_dir=data_dir,
+        tickers=tickers,
+        start_date=start_date,
+        end_date=end_date,
+    )
+    if universe == "point_in_time":
+        feed_kwargs.update(
+            membership=DEFAULT_MEMBERSHIP_PATH,
+            removed_data_dir=DEFAULT_REMOVED_DATA_DIR,
+        )
+    feed = DataFeed(**feed_kwargs)
     if len(feed) == 0:
         raise ValueError("No data found. Check your --tickers and date range.")
 
@@ -71,6 +88,7 @@ def run_compare(
         result = run_strategy_analysis(
             signals, feed._data, label,
             end_date=pd.Timestamp(end_date) if end_date else None,
+            membership=feed.membership,
         )
         results[label] = {"trades": result["trades"], "equity_curve": result["equity_curve"]}
 
@@ -108,11 +126,22 @@ def main():
         "--data-dir", default=DEFAULT_DATA_DIR,
         help="Directory containing Parquet files",
     )
+    parser.add_argument(
+        "--universe", default="current", choices=UNIVERSE_CHOICES,
+        help="'point_in_time' restricts members to their actual S&P 500 "
+             "membership windows (requires membership.csv)",
+    )
     args = parser.parse_args()
 
     tickers = args.tickers or ([args.ticker] if args.ticker else None)
     if not tickers:
-        parser.error("Provide --ticker or --tickers")
+        if args.universe == "point_in_time":
+            membership = pd.read_csv(
+                DEFAULT_MEMBERSHIP_PATH, parse_dates=["date_added", "date_removed"]
+            )
+            tickers = sorted(membership["ticker"].unique())
+        else:
+            parser.error("Provide --ticker or --tickers")
 
     ranking, strategy_results = run_compare(
         tickers=tickers,
@@ -121,6 +150,7 @@ def main():
         end_date=args.end,
         sort_by=args.sort_by,
         data_dir=args.data_dir,
+        universe=args.universe,
     )
 
     print(format_ranking_table(ranking))
