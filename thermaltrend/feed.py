@@ -7,6 +7,12 @@ Usage:
     feed = DataFeed("thermaltrend/data/equities")
     for bar in feed:
         process(bar)
+
+Point-in-time universe:
+    pass ``membership`` (path to membership.csv or a DataFrame) plus
+    ``removed_data_dir`` to restrict every index member to the windows it was
+    actually in the S&P 500 (fixing survivorship bias). Tickers that are not
+    in the membership table (e.g. the SPY benchmark) pass through unfiltered.
 """
 
 from dataclasses import dataclass
@@ -34,22 +40,58 @@ class DataFeed:
         tickers: list[str] | None = None,
         start_date: str | None = None,
         end_date: str | None = None,
+        membership: str | Path | pd.DataFrame | None = None,
+        removed_data_dir: str | Path | None = None,
     ):
         self.data_dir = Path(data_dir)
+        self.removed_data_dir = Path(removed_data_dir) if removed_data_dir else None
         self._tickers = tickers
         self._start_date = pd.Timestamp(start_date) if start_date else None
         self._end_date = pd.Timestamp(end_date) if end_date else None
+        self._membership = self._load_membership(membership)
         self._data = self._load()
 
-    def _load(self) -> pd.DataFrame:
+    @staticmethod
+    def _load_membership(
+        membership: str | Path | pd.DataFrame | None,
+    ) -> pd.DataFrame | None:
+        if membership is None:
+            return None
+        if isinstance(membership, pd.DataFrame):
+            return membership
+        path = Path(membership)
+        if not path.exists():
+            raise ValueError(f"membership CSV not found: {path}")
+        return pd.read_csv(path, parse_dates=["date_added", "date_removed"])
+
+    def _bases(self) -> list[Path]:
+        bases = [self.data_dir]
+        if self.removed_data_dir:
+            bases.append(self.removed_data_dir)
+        return bases
+
+    def _resolve_paths(self) -> list[Path]:
         if self._tickers:
             paths = []
             for t in self._tickers:
-                p = self.data_dir / f"{t}.parquet"
-                if p.exists():
-                    paths.append(p)
+                for base in self._bases():
+                    p = base / f"{t}.parquet"
+                    if p.exists():
+                        paths.append(p)
+                        break
         else:
             paths = sorted(self.data_dir.glob("*.parquet"))
+            if self.removed_data_dir and self.removed_data_dir.exists():
+                existing = {p.stem for p in paths}
+                paths += sorted(
+                    p
+                    for p in self.removed_data_dir.glob("*.parquet")
+                    if p.stem not in existing
+                )
+        return paths
+
+    def _load(self) -> pd.DataFrame:
+        paths = self._resolve_paths()
 
         if not paths:
             return pd.DataFrame()
@@ -74,7 +116,39 @@ class DataFeed:
                 combined.index.get_level_values("date") <= self._end_date
             ]
 
+        if self._membership is not None:
+            combined = self._filter_membership(combined)
+
         return combined
+
+    def _filter_membership(self, combined: pd.DataFrame) -> pd.DataFrame:
+        """Keep only bars that fall inside a membership stint for each ticker.
+
+        Tickers absent from the membership table (e.g. the SPY benchmark ETF)
+        are kept untouched. Afterwards the frame is re-sorted by (date, ticker).
+        """
+        if combined.empty:
+            return combined
+
+        m = self._membership
+        frames = []
+        for ticker, grp in combined.groupby(level="ticker", sort=False):
+            rows = m[m["ticker"] == ticker]
+            if rows.empty:
+                frames.append(grp)
+                continue
+            dates = grp.index.get_level_values("date")
+            keep = pd.Series(False, index=dates)
+            for _, r in rows.iterrows():
+                mask = dates >= r["date_added"]
+                if pd.notna(r["date_removed"]):
+                    mask &= dates <= r["date_removed"]
+                keep |= mask
+            frames.append(grp[keep.values])
+
+        filtered = pd.concat(frames)
+        filtered.sort_index(inplace=True)
+        return filtered
 
     def __iter__(self):
         for (date, ticker), row in self._data.iterrows():
@@ -136,6 +210,11 @@ class DataFeed:
         )
 
     @property
+    def membership(self) -> pd.DataFrame | None:
+        """The loaded point-in-time membership table (or None)."""
+        return self._membership
+
+    @property
     def shape(self) -> tuple[int, int]:
         return self._data.shape
 
@@ -161,9 +240,26 @@ def main():
         default=str(Path(__file__).parent / "data" / "equities"),
         help="Directory containing Parquet files",
     )
+    parser.add_argument(
+        "--removed-data-dir",
+        default=None,
+        help="Directory with Parquet files for removed S&P 500 members",
+    )
+    parser.add_argument(
+        "--membership",
+        default=None,
+        help="membership.csv for point-in-time filtering",
+    )
     args = parser.parse_args()
 
-    feed = DataFeed(args.data_dir, tickers=args.tickers, start_date=args.start, end_date=args.end)
+    feed = DataFeed(
+        args.data_dir,
+        tickers=args.tickers,
+        start_date=args.start,
+        end_date=args.end,
+        membership=args.membership,
+        removed_data_dir=args.removed_data_dir,
+    )
     print(feed)
 
     if args.date:

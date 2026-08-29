@@ -5,6 +5,11 @@ Converts raw SignalEvents into simulated Trades with PnL, using:
 - Entry/exit at next day's open (no lookahead bias)
 - Optional ATR-based stop loss (2x ATR, 14-day lookback)
 - Unmatched BUY signals closed at last available price with "data_end" flag
+- Optional point-in-time membership exits: positions still open when a ticker
+  leaves the S&P 500 are force-closed at the last member-day close
+  ("universe_exit"). If the ticker's price data ran out well before the removal
+  date (a genuine delisting/gap), the exit price is the last close discounted
+  by the Shumway delisting-return estimate ("delisted").
 """
 
 from dataclasses import dataclass, field
@@ -29,7 +34,7 @@ class Trade:
     pnl: float
     pnl_pct: float
     holding_days: int
-    exit_reason: str  # "signal" | "stop_loss" | "data_end"
+    exit_reason: str  # "signal" | "stop_loss" | "data_end" | "universe_exit" | "delisted"
     strategy_id: str
     shares: int = 0
     stop_price: float = 0.0
@@ -50,11 +55,14 @@ class TradeSimulator:
     stop_atr_multiple: float = 2.0
     atr_lookback: int = 14
     use_next_day_open: bool = True
+    max_delisting_gap_days: int = 10
 
     def simulate(
         self,
         signals: list[SignalEvent],
         price_data: pd.DataFrame,
+        membership: pd.DataFrame | None = None,
+        delisting_return: float = -0.30,
     ) -> list[Trade]:
         """Simulate trades from signals against price data.
 
@@ -62,6 +70,13 @@ class TradeSimulator:
             signals: List of SignalEvents from the engine.
             price_data: DataFrame with MultiIndex (date, ticker) and
                        columns Open, High, Low, Close, Volume.
+            membership: Optional point-in-time membership table
+                        (columns ticker, date_added, date_removed). Positions
+                        still open when a ticker leaves the S&P 500 are
+                        force-closed at the last available member price.
+            delisting_return: Shumway-style estimated one-time return applied
+                              when a ticker's price history ends well before
+                              its removal date (default -30%).
 
         Returns:
             List of completed Trade objects.
@@ -69,6 +84,7 @@ class TradeSimulator:
         if not signals or price_data.empty:
             return []
 
+        removal_dates = self._build_removal_dates(membership)
         signals_by_ticker = self._group_signals_by_ticker(signals)
         all_trades: list[Trade] = []
 
@@ -76,10 +92,26 @@ class TradeSimulator:
             ticker_data = self._get_ticker_data(price_data, ticker)
             if ticker_data.empty:
                 continue
-            trades = self._simulate_ticker(ticker_signals, ticker_data, ticker)
+            trades = self._simulate_ticker(
+                ticker_signals,
+                ticker_data,
+                ticker,
+                removal_dates=removal_dates.get(ticker, []),
+                delisting_return=delisting_return,
+            )
             all_trades.extend(trades)
 
         return sorted(all_trades, key=lambda t: t.entry_date)
+
+    @staticmethod
+    def _build_removal_dates(membership: pd.DataFrame | None) -> dict[str, list[pd.Timestamp]]:
+        """Map ticker -> sorted list of S&P 500 removal dates, if any."""
+        removals: dict[str, list[pd.Timestamp]] = {}
+        if membership is not None:
+            removed = membership[membership["date_removed"].notna()]
+            for ticker, grp in removed.groupby("ticker"):
+                removals[ticker] = sorted(pd.DatetimeIndex(grp["date_removed"]))
+        return removals
 
     def _group_signals_by_ticker(
         self, signals: list[SignalEvent]
@@ -136,16 +168,32 @@ class TradeSimulator:
         signals: list[SignalEvent],
         ticker_data: pd.DataFrame,
         ticker: str,
+        removal_dates: list[pd.Timestamp] | None = None,
+        delisting_return: float = -0.30,
     ) -> list[Trade]:
         """Simulate trades for a single ticker's signals."""
         trades: list[Trade] = []
         atr = self._compute_atr(ticker_data) if self.stop_atr_multiple > 0 else None
         dates = ticker_data.index
+        removal_dates = removal_dates or []
 
         open_position: dict | None = None
 
         for signal in signals:
             signal_date = pd.Timestamp(signal.timestamp.date())
+
+            if open_position is not None:
+                exit_info = self._force_exit(
+                    ticker_data, open_position, removal_dates,
+                    delisting_return, as_of=signal_date,
+                )
+                if exit_info is not None:
+                    exit_date, exit_price, exit_reason = exit_info
+                    trades.append(self._close_trade(
+                        open_position, exit_date, exit_price, exit_reason
+                    ))
+                    open_position = None
+                    continue
 
             if signal.direction == SignalDirection.BUY and open_position is None:
                 entry_date = self._find_next_date(ticker_data, signal_date)
@@ -217,15 +265,73 @@ class TradeSimulator:
                 open_position = None
 
         if open_position is not None:
-            last_date = dates[-1]
-            last_close = self._get_price_on_date(ticker_data, last_date, "Close")
-            if last_close is not None:
+            exit_info = self._force_exit(
+                ticker_data, open_position, removal_dates, delisting_return
+            )
+            if exit_info is not None:
+                exit_date, exit_price, exit_reason = exit_info
+                trade = self._close_trade(
+                    open_position, exit_date, exit_price, exit_reason
+                )
+            else:
+                last_date = dates[-1]
+                last_close = self._get_price_on_date(ticker_data, last_date, "Close")
+                if last_close is None:
+                    return trades
                 trade = self._close_trade(
                     open_position, last_date.to_pydatetime(), last_close, "data_end"
                 )
-                trades.append(trade)
+            trades.append(trade)
 
         return trades
+
+    def _force_exit(
+        self,
+        ticker_data: pd.DataFrame,
+        position: dict,
+        removal_dates: list[pd.Timestamp],
+        delisting_return: float,
+        as_of: pd.Timestamp | None = None,
+    ) -> tuple[datetime, float, str] | None:
+        """Force-close a position when its ticker leaves the S&P 500.
+
+        Returns (exit_date, exit_price, exit_reason) if the earliest removal
+        date on or after the entry has happened by ``as_of`` (or at all when
+        ``as_of`` is None, i.e. the end-of-data sweep). If the ticker's last
+        available price is ``max_delisting_gap_days`` or more before the removal
+        date, the data has run out early (a genuine delisting): the position is
+        closed at the last close discounted by the Shumway delisting return.
+        """
+        if not removal_dates:
+            return None
+
+        entry_date = pd.Timestamp(position["entry_date"])
+        upcoming = [
+            r for r in removal_dates
+            if r >= entry_date and (as_of is None or r <= as_of)
+        ]
+        if not upcoming:
+            return None
+        removal = upcoming[0]
+
+        bars_before = ticker_data.loc[ticker_data.index <= removal]
+        if bars_before.empty:
+            return None
+
+        last_date = bars_before.index[-1]
+        last_close = float(bars_before.loc[last_date, "Close"])
+        gap_days = (removal - last_date).days
+        if gap_days > self.max_delisting_gap_days:
+            return (
+                last_date.to_pydatetime(),
+                last_close * (1.0 + delisting_return),
+                "delisted",
+            )
+        return (
+            last_date.to_pydatetime(),
+            last_close,
+            "universe_exit",
+        )
 
     def _check_stop_hit(
         self,

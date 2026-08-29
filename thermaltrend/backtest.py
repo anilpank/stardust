@@ -6,6 +6,7 @@ Usage:
     python thermaltrend/backtest.py --strategy donchian --tickers AAPL MSFT --start 2023-01-01
     python thermaltrend/backtest.py --strategy ma_crossover --ticker AAPL --params '{"fast_period": 20, "slow_period": 50}'
     python thermaltrend/backtest.py --strategy rsi_mean_reversion --ticker AAPL --start 2023-01-01 --output result.json
+    python thermaltrend/backtest.py --strategy ma_crossover --universe point_in_time --start 2010-01-01
 """
 
 import json
@@ -36,6 +37,10 @@ from thermaltrend.core.strategy import (
 from thermaltrend.feed import DataFeed
 
 DEFAULT_DATA_DIR = str(Path(__file__).parent / "data" / "equities")
+DEFAULT_REMOVED_DATA_DIR = str(Path(__file__).parent / "data" / "equities_removed")
+DEFAULT_MEMBERSHIP_PATH = str(Path(__file__).parent / "data" / "equities" / "membership.csv")
+
+UNIVERSE_CHOICES = ["current", "point_in_time"]
 
 STRATEGIES = {
     "ma_crossover": lambda params=None: MACrossoverStrategy(
@@ -63,6 +68,7 @@ def run_backtest(
     end_date: str | None = None,
     params: dict | None = None,
     data_dir: str = DEFAULT_DATA_DIR,
+    universe: str = "current",
 ) -> dict:
     """Run a full backtest for a single strategy. Library-friendly.
 
@@ -76,14 +82,27 @@ def run_backtest(
         )
 
     strategy = STRATEGIES[strategy_name](params)
-    feed = DataFeed(data_dir, tickers=tickers, start_date=start_date, end_date=end_date)
+    feed_kwargs = dict(
+        data_dir=data_dir,
+        tickers=tickers,
+        start_date=start_date,
+        end_date=end_date,
+    )
+    if universe == "point_in_time":
+        feed_kwargs.update(
+            membership=DEFAULT_MEMBERSHIP_PATH,
+            removed_data_dir=DEFAULT_REMOVED_DATA_DIR,
+        )
+    feed = DataFeed(**feed_kwargs)
 
     if len(feed) == 0:
         raise ValueError("No data found. Check your --tickers and date range.")
 
     engine = DataEngine(feed, strategy)
     signals = engine.run()
-    result = run_strategy_analysis(signals, feed._data, strategy_name)
+    result = run_strategy_analysis(
+        signals, feed._data, strategy_name, membership=feed.membership
+    )
     return result
 
 
@@ -151,11 +170,22 @@ def main():
         "--data-dir", default=DEFAULT_DATA_DIR,
         help="Directory containing Parquet files",
     )
+    parser.add_argument(
+        "--universe", default="current", choices=UNIVERSE_CHOICES,
+        help="'point_in_time' restricts members to their actual S&P 500 "
+             "membership windows (requires membership.csv)",
+    )
     args = parser.parse_args()
 
     tickers = args.tickers or ([args.ticker] if args.ticker else None)
     if not tickers:
-        parser.error("Provide --ticker or --tickers")
+        if args.universe == "point_in_time":
+            membership = pd.read_csv(
+                DEFAULT_MEMBERSHIP_PATH, parse_dates=["date_added", "date_removed"]
+            )
+            tickers = sorted(membership["ticker"].unique())
+        else:
+            parser.error("Provide --ticker or --tickers")
 
     params = json.loads(args.params) if args.params else None
 
@@ -166,6 +196,7 @@ def main():
         end_date=args.end,
         params=params,
         data_dir=args.data_dir,
+        universe=args.universe,
     )
 
     _print_summary(result, show_per_ticker=args.per_ticker, show_regime=args.regime, show_period=args.period)

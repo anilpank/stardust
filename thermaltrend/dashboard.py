@@ -46,6 +46,8 @@ from thermaltrend.feed import DataFeed
 from thermaltrend.signal_store import SignalStore
 
 DEFAULT_DATA_DIR = str(Path(__file__).parent / "data" / "equities")
+DEFAULT_REMOVED_DATA_DIR = str(Path(__file__).parent / "data" / "equities_removed")
+DEFAULT_MEMBERSHIP_PATH = str(Path(__file__).parent / "data" / "equities" / "membership.csv")
 
 STRATEGY_REGISTRY = {
     "MA 50/200": MACrossoverStrategy,
@@ -75,6 +77,25 @@ DUAL_MOMENTUM_LABEL = "Dual Mom 126d"
 BENCHMARK_TICKER = "SPY"
 
 ALL_TICKERS = sorted(p.stem for p in Path(DEFAULT_DATA_DIR).glob("*.parquet") if p.stem != "SPY")
+
+UNIVERSE_CHOICES = ["current", "point_in_time"]
+
+
+def build_feed(
+    tickers: list[str],
+    start: str | None,
+    end: str | None,
+    universe: str = "current",
+) -> DataFeed:
+    """Construct a DataFeed, restricting to S&P 500 membership windows when
+    ``universe`` is "point_in_time" (fixes survivorship bias)."""
+    kwargs = dict(tickers=tickers, start_date=start, end_date=end)
+    if universe == "point_in_time":
+        kwargs.update(
+            membership=DEFAULT_MEMBERSHIP_PATH,
+            removed_data_dir=DEFAULT_REMOVED_DATA_DIR,
+        )
+    return DataFeed(DEFAULT_DATA_DIR, **kwargs)
 
 
 def resolve_feed_tickers(
@@ -362,7 +383,7 @@ def page_regime(result: dict):
     st.plotly_chart(regime_bar(regime_m), use_container_width=True)
 
 
-def page_signals(strategy_name: str, tickers: list[str], start: str, end: str):
+def page_signals(strategy_name: str, tickers: list[str], start: str, end: str, universe: str = "current"):
     st.subheader("Generate & View Signals")
 
     col1, col2 = st.columns([1, 1])
@@ -375,11 +396,11 @@ def page_signals(strategy_name: str, tickers: list[str], start: str, end: str):
         with st.spinner("Running strategy..."):
             strategy_cls = STRATEGY_REGISTRY[strategy_name]
             strategy = strategy_cls(**STRATEGY_DEFAULTS[strategy_name])
-            feed = DataFeed(
-                DEFAULT_DATA_DIR,
-                tickers=resolve_feed_tickers(strategy_name, list(tickers)),
-                start_date=start,
-                end_date=end,
+            feed = build_feed(
+                resolve_feed_tickers(strategy_name, list(tickers)),
+                start,
+                end,
+                universe,
             )
 
             if len(feed) == 0:
@@ -420,7 +441,7 @@ def page_signals(strategy_name: str, tickers: list[str], start: str, end: str):
                 st.success(f"Signals saved! Run ID: `{run_id}`")
 
 
-def page_compare(tickers: list[str], start: str, end: str):
+def page_compare(tickers: list[str], start: str, end: str, universe: str = "current"):
     st.subheader("Compare Strategies")
 
     sort_by = st.selectbox(
@@ -440,6 +461,7 @@ def page_compare(tickers: list[str], start: str, end: str):
                 start_date=start,
                 end_date=end,
                 sort_by=sort_by,
+                universe=universe,
             )
 
         st.success("Comparison complete")
@@ -845,6 +867,19 @@ def main():
                 default=["AAPL", "MSFT", "GOOGL"],
             )
 
+            universe = st.selectbox(
+                "Universe",
+                UNIVERSE_CHOICES,
+                index=0,
+                format_func=lambda u: {
+                    "current": "Current members",
+                    "point_in_time": "Point-in-time (S&P 500 membership)",
+                }[u],
+                help="Point-in-time restricts each ticker to the dates it was "
+                     "an S&P 500 member, using membership.csv.",
+            )
+            st.session_state["universe"] = universe
+
             col1, col2 = st.columns(2)
             with col1:
                 start = st.date_input("Start", value=pd.Timestamp("2023-01-01").date())
@@ -889,8 +924,7 @@ def main():
                         strategy_cls = STRATEGY_REGISTRY[strategy_name]
                         strategy = strategy_cls(**(params if params else STRATEGY_DEFAULTS[strategy_name]))
                         feed_tickers = resolve_feed_tickers(strategy_name, list(tickers), params)
-                        feed = DataFeed(DEFAULT_DATA_DIR, tickers=feed_tickers,
-                                        start_date=str(start), end_date=str(end))
+                        feed = build_feed(feed_tickers, str(start), str(end), universe)
 
                         if len(feed) == 0:
                             st.error("No data found. Check your tickers and date range.")
@@ -903,6 +937,7 @@ def main():
                         result = run_strategy_analysis(
                             signals, feed._data, strategy_name,
                             end_date=pd.Timestamp(end),
+                            membership=feed.membership,
                         )
                         st.session_state["result"] = result
                         st.session_state["running"] = False
@@ -917,12 +952,12 @@ def main():
         if not tickers:
             st.info("Select tickers in the sidebar to compare strategies.")
         else:
-            page_compare(tickers, str(start), str(end))
+            page_compare(tickers, str(start), str(end), universe)
     elif tab_choice == "Signals":
         if not tickers:
             st.info("Select tickers in the sidebar to generate signals.")
         else:
-            page_signals(strategy_name, tickers, str(start), str(end))
+            page_signals(strategy_name, tickers, str(start), str(end), universe)
     elif tab_choice == "Data Explorer":
         page_data_explorer()
     elif tab_choice == "Compare Tickers":

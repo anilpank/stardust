@@ -81,6 +81,8 @@ def run_strategy_analysis(
     strategy_name: str,
     simulator: TradeSimulator | None = None,
     end_date: pd.Timestamp | None = None,
+    membership: pd.DataFrame | None = None,
+    delisting_return: float = -0.30,
 ) -> dict:
     """Full analysis pipeline for a single strategy.
 
@@ -90,6 +92,10 @@ def run_strategy_analysis(
         strategy_name: Name for this strategy.
         simulator: Optional custom TradeSimulator.
         end_date: Optional end date to extend equity curve to.
+        membership: Optional point-in-time membership table so positions are
+                    force-closed when a ticker leaves the S&P 500.
+        delisting_return: Shumway-style delisting-return estimate for tickers
+                          whose price data ends well before removal.
 
     Returns:
         Dict with trades, signals, equity_curve, per_ticker, metrics, confidence.
@@ -97,7 +103,11 @@ def run_strategy_analysis(
     if simulator is None:
         simulator = TradeSimulator()
 
-    trades = simulator.simulate(signals, price_data)
+    trades = simulator.simulate(
+        signals, price_data,
+        membership=membership,
+        delisting_return=delisting_return,
+    )
 
     if trades:
         first_entry = min(t.entry_date for t in trades)
