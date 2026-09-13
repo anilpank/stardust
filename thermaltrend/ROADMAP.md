@@ -25,10 +25,11 @@ Working pipeline: **DataFeed → DataEngine → Strategy → SignalEvents → Tr
 | Point-in-Time Universe (`--universe point_in_time` + `membership.csv`) | Built (restricts trades to actual S&P 500 membership windows) |
 | Removed-Member Data (`data/equities_removed/` + `download_removed.py`) | Built (258 removed members backfilled; 445 genuinely delisted) |
 | Survivorship-Bias Tooling (`survivorship_bias.py`, `removed_coverage.py`) | Built (bias ~2.6–4.3%/yr survivors-only; ±<1%/yr residual with PIT) |
+| Walk-Forward Validation (`walk_forward.py`) | Built (rolling out-of-sample: grid search on train windows, score on held-out test windows, IS→OOS decay) |
 | Portfolio & Risk | Not built |
 | Execution Handler | Not built |
 
-Source: ~4,800 lines across 22 modules. Tests: ~6,100 lines across 26 files (426 tests; 394 fast unit + 32 integration).
+Source: ~5,550 lines across 23 modules. Tests: ~6,600 lines across 27 files (473 tests; 441 fast unit + 32 integration).
 
 ---
 
@@ -64,6 +65,7 @@ thermaltrend/analytics/
 - `download_removed.py` — backfill price data for removed S&P 500 members (parallel, resumable)
 - `removed_coverage.py` — per-stint data coverage report for removed members
 - `survivorship_bias.py` — quantify survivorship bias vs the real equal-weight index (`--include-removed` for the PIT estimate)
+- `walk_forward.py` — rolling out-of-sample validation (re-optimize params on each train window, score held-out test windows, IS→OOS decay)
 
 ---
 
@@ -155,6 +157,9 @@ Phase 3b (done)     →  Streamlit dashboard (dashboard.py, charts.py): Overview
 Phase 3c (done)     →  survivorship-bias correction: membership.csv + data/equities_removed/ +
                        --universe point_in_time (Shumway delisting exits; bias quantified
                        ~2.6–4.3%/yr survivors-only → ±<1%/yr residual with PIT universe)
+Phase 3d (done)     →  walk-forward (rolling out-of-sample) validation: walk_forward.py —
+                       per-window grid optimization on TRAIN, scoring on held-out TEST,
+                       concatenated OOS equity curve + IS→OOS decay; --universe supported
 Phase 4 (next)      →  portfolio/ package (position sizing, PnL)
 Phase 5 (later)     →  execution/ (OrderEvent, FillEvent, simulated fills)
 Phase 6 (future)    →  live broker bridge

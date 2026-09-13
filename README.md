@@ -46,10 +46,11 @@ thermaltrend/
 ├── compare_cli.py                 # Compare multiple strategies (CLI + library, --universe)
 ├── signal_store.py                # Persist, query, and annotate signals
 ├── signals.py                     # Generate trading signals (with --save)
+├── walk_forward.py                # Walk-forward (rolling out-of-sample) validation
 ├── dashboard.py                   # Streamlit dashboard: backtests, signals, comparisons,
 │                                  #   Data Explorer, Compare Tickers
 ├── charts.py                      # Plotly chart builders used by the dashboard
-└── tests/                         # 426 tests across 26 files (394 fast unit + 32 integration)
+└── tests/                         # 473 tests across 27 files (441 fast unit + 32 integration)
 ```
 
 ## Running Scripts
@@ -279,6 +280,38 @@ from thermaltrend.compare_cli import run_compare
 
 ranking = run_compare(tickers=["AAPL", "MSFT", "GOOGL"], start_date="2023-01-01")
 print(ranking)
+```
+
+### Walk-Forward Validation
+
+Backtests tune a strategy once and evaluate it on the same data — that overstates historical performance. Walk-forward simulates live conditions: for each rolling window the strategy parameters are optimized (grid search) on a **train** segment and then scored on the immediately following, held-out **test** segment. Every number is out-of-sample, and the reported **IS→OOS decay** (in-sample minus out-of-sample metric) reveals how much a strategy's edge is overfitting:
+
+```bash
+# Grid search fast/slow MAs per window, score on held-out test segments
+python thermaltrend/walk_forward.py --strategy ma_crossover --tickers AAPL MSFT \
+    --start 2015-01-01 --grid '{"fast_period": [5, 10, 20, 50], "slow_period": [100, 200]}'
+
+# Different objective, JSON export, point-in-time universe (avoids survivorship bias)
+python thermaltrend/walk_forward.py --strategy rsi_mean_reversion --ticker AAPL \
+    --grid '{"period": [10, 14, 20], "oversold": [20, 30], "overbought": [70, 80]}' \
+    --objective sharpe --output wf.json --universe point_in_time --start 2010-01-01
+```
+
+Defaults: 504-day train, 126-day held-out test, non-overlapping windows, 252-day indicator warmup (all configurable: `--train-days`, `--test-days`, `--step-days`, `--warmup-days`). Only trades that *exit* inside the held-out window count toward that window's metrics; windows with fewer than 5 completed trades report `sharpe`/`sortino`/`calmar` as N/A. Objectives: `cagr`, `sharpe`, `sortino`, `max_drawdown`, `calmar`, `win_rate`, `total_trades`.
+
+Library usage:
+
+```python
+from thermaltrend.walk_forward import run_walk_forward, format_walk_forward_table
+
+result = run_walk_forward(
+    strategy_name="ma_crossover",
+    tickers=["AAPL", "MSFT"],
+    start_date="2015-01-01",
+    grid={"fast_period": [5, 20, 50], "slow_period": [100, 200]},
+)
+print(format_walk_forward_table(result))
+print(result.decay)  # {metric: {is_mean, oos_mean, decay}}
 ```
 
 ### Point-in-Time Universe (Survivorship Bias)
