@@ -20,8 +20,8 @@ The data pipeline, event-driven engine, and analytics module are built. Data is 
 | Data range | 1970 → Aug 28 2026 (varies by ticker) |
 | Columns | Open, High, Low, Close, Volume (auto-adjusted) |
 | Strategies | 5 (MA Crossover, Donchian Breakout, RSI Mean Reversion, ATR Trailing Stop, Dual Momentum) |
-| Total source code | ~4,800 lines across 22 modules |
-| Total test code | ~6,100 lines across 26 test files (426 tests: 394 fast unit + 32 integration) |
+| Total source code | ~5,550 lines across 23 modules |
+| Total test code | ~6,600 lines across 27 test files (473 tests: 441 fast unit + 32 integration) |
 | Git commits | 66 |
 
 ## Scripts
@@ -40,6 +40,7 @@ The data pipeline, event-driven engine, and analytics module are built. Data is 
 | `backtest.py` | Backtest a single strategy with full metrics (`--universe current\|point_in_time`) | `cd thermaltrend && python thermaltrend/backtest.py --strategy ma_crossover --ticker AAPL --start 2023-01-01` |
 | `compare_cli.py` | Compare multiple strategies side-by-side (`--universe current\|point_in_time`) | `cd thermaltrend && python thermaltrend/compare_cli.py --tickers AAPL MSFT --start 2023-01-01` |
 | `signal_store.py` | Persist, query, and annotate signals | `cd thermaltrend && python thermaltrend/signal_store.py list` |
+| `walk_forward.py` | Walk-forward (rolling out-of-sample) validation | `cd thermaltrend && python thermaltrend/walk_forward.py --strategy ma_crossover --tickers AAPL --start 2015-01-01 --grid '{"fast_period": [10, 20, 50], "slow_period": [100, 200]}'` |
 | `dashboard.py` | Streamlit visual dashboard (run from repo root) | `streamlit run thermaltrend/dashboard.py` |
 
 Note: `dual_momentum` requires the benchmark ticker (SPY) in your ticker list on the CLI — it learns
@@ -92,6 +93,47 @@ Backtesting only today's members overstates historical returns (delisted losers 
 - With removed data included, the residual bias collapses: 2005 **+1.20%/yr**, 2010 **+0.87%/yr**, 2015 **+0.47%/yr**, 2020 **−0.44%/yr**. Surviving members still beat the equal-weight index roughly by the survivorship premium; the 2020 residual reflects cap-weight differences vs RSP.
 
 Caveat: `update_data.py` only refreshes `data/equities/` — removed-member files are static until you re-run `download_removed.py`.
+
+## Walk-Forward Validation
+
+`walk_forward.py` runs the closest simulation of live trading: for each rolling window the strategy parameters are optimized (grid search) on a **TRAIN** segment and then scored on the immediately following, held-out **TEST** segment. Nothing in a test segment influences parameter choice, so the concatenated out-of-sample equity curve reflects how the strategy would have performed if you had re-tuned it going forward. It also reports **IS→OOS decay** (in-sample minus out-of-sample metric) — the gap that reveals overfitting.
+
+```bash
+# Basic walk-forward with a parameter grid
+python thermaltrend/walk_forward.py \
+    --strategy ma_crossover --tickers AAPL MSFT --start 2015-01-01 \
+    --grid '{"fast_period": [5, 10, 20, 50], "slow_period": [100, 200]}'
+
+# Different objective, JSON export, point-in-time universe
+python thermaltrend/walk_forward.py --strategy rsi_mean_reversion --ticker AAPL \
+    --grid '{"period": [10, 14, 20], "oversold": [20, 30], "overbought": [70, 80]}' \
+    --objective sharpe --output wf.json --universe point_in_time --start 2010-01-01
+```
+
+Defaults: 504-day train / 126-day test / non-overlapping steps / 252-day warmup (see
+`train_days`/`test_days`/`step_days`/`warmup_days`). Trade metrics only count trades that
+*exited* inside the held-out window, so a position straddling the boundary is scored OOS only.
+Windows with fewer than 5 completed trades report risk-adjusted metrics (`sharpe`, `sortino`,
+`calmar`) as **N/A** — they are excluded from the decay means.
+
+Library usage:
+
+```python
+from thermaltrend.walk_forward import run_walk_forward, format_walk_forward_table
+
+result = run_walk_forward(
+    strategy_name="ma_crossover",
+    tickers=["AAPL", "MSFT"],
+    start_date="2015-01-01",
+    grid={"fast_period": [5, 20, 50], "slow_period": [100, 200]},
+    objective="sharpe",
+)
+print(format_walk_forward_table(result))
+# result.rows          → per-window best params + IS/OOS metrics
+# result.metrics       → aggregate metrics over ALL out-of-sample trades
+# result.equity_curve  → OOS-only equity curve
+# result.decay         → {metric: {is_mean, oos_mean, decay}}
+```
 
 ## Analytics Usage
 
@@ -177,12 +219,13 @@ python -m thermaltrend.signals --strategy atr_trailing_stop --tickers AAPL MSFT 
 python -m thermaltrend.signals --strategy dual_momentum --tickers AAPL MSFT SPY --start 2024-01-01
 ```
 
-Test files (26 files, 426 tests: 394 fast unit + 32 integration):
+Test files (27 files, 473 tests: 441 fast unit + 32 integration):
 - `tests/test_events.py` — EventQueue, MarketEvent, SignalEvent
 - `tests/test_strategy.py` — all 5 strategies incl. DualMomentumStrategy
 - `tests/test_engine.py` — DataEngine integration
 - `tests/test_feed.py` / `test_feed_integration.py` — DataFeed loading + real-data checks
 - `tests/test_pit_universe.py` — membership masking, `universe_exit` / Shumway `delisted` force-closes, PIT CLI runs
+- `tests/test_walk_forward.py` — grid expansion, param coercion, window scheduling, IS/OOS segmentation, best-combo selection, decay, PIT universe, sparse-metric N/A, CLI
 - `tests/test_membership_tools.py` — build_membership / download_removed / removed_coverage / survivorship_bias logic
 - `tests/test_download_removed_integration.py` — removed-member downloader (slow, Yahoo network, `--output` fixtures)
 - `tests/test_signals.py` — signals.py CLI + formatting
@@ -211,6 +254,7 @@ Pre-commit hook: `.pre-commit-config.yaml` runs `pytest -m "not slow" -q` on eve
 | `thermaltrend/backtest.py` | `run_backtest()` library function + CLI — single-strategy backtest with metrics |
 | `thermaltrend/compare_cli.py` | `run_compare()` library function + CLI — multi-strategy ranking with benchmark |
 | `thermaltrend/signal_store.py` | `SignalStore` class + CLI — persist, query, and annotate signals |
+| `thermaltrend/walk_forward.py` | Walk-forward validation — rolling train/test windows, grid optimization, OOS metrics + IS→OOS decay |
 | `thermaltrend/signals.py` | Signal output CLI — runs strategy on data feed, outputs ranked trading signals (--save to persist) |
 | `thermaltrend/dashboard.py` | Streamlit dashboard — backtests, signals, compare, Data Explorer, Compare Tickers |
 | `thermaltrend/charts.py` | Plotly chart builders used by the dashboard |
@@ -279,7 +323,7 @@ pip install pandas numpy yfinance requests pyarrow pytest pre-commit
 ## If Starting a New Session
 
 - Run `git log --oneline -5` to see recent commits
-- Run `pytest thermaltrend/tests/ -m "not slow" -v` to confirm tests pass (394 fast unit tests, 32 integration deselected)
+- Run `pytest thermaltrend/tests/ -m "not slow" -v` to confirm tests pass (441 fast unit tests, 32 integration deselected)
 - If resuming after a break, run `python thermaltrend/update_data.py` to refresh all 502 equity parquet files (last full update: Aug 28 2026)
 - Run `python thermaltrend/update_data.py --tickers AAPL` to verify the data pipeline works
 - Run `streamlit run thermaltrend/dashboard.py` and try the Compare tab (Dual Momentum should appear with SPY auto-added); switch the sidebar **Universe** selector to Point-in-time
@@ -287,6 +331,12 @@ pip install pandas numpy yfinance requests pyarrow pytest pre-commit
 - Run `python -m thermaltrend.signals --tickers AAPL MSFT --start 2024-01-01` to verify signal generation works
 - Run `python thermaltrend/backtest.py --strategy ma_crossover --ticker AAL --universe point_in_time --start 2015-01-01` — AAL should trade only during its 2015-03-23 → 2024-09-23 membership stint
 - Run `python thermaltrend/survivorship_bias.py --include-removed` to see the PIT-correction numbers
+- Try walk-forward validation:
+
+```bash
+python thermaltrend/walk_forward.py --strategy ma_crossover --tickers AAPL MSFT \
+    --start 2015-01-01 --grid '{"fast_period": [10, 20, 50], "slow_period": [100, 200]}'
+```
 - Try the backtest:
 
 ```bash

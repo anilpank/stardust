@@ -197,6 +197,18 @@ python thermaltrend/backtest.py --strategy ma_crossover --universe point_in_time
 
 Use this for any backtest that starts before today's date. It uses the `membership.csv` table that ships with the project (no extra setup needed). When reading results, remember that stocks removed from the index long ago often have no price history — those positions are closed at the assumed delisting return above, so point-in-time numbers are a fair, conservative estimate, not a perfect reconstruction.
 
+### Walk-Forward Validation (Advanced)
+
+A single backtest overfits: you tune a strategy on the whole history, then measure it on that same history. **Walk-forward** measures a strategy the way you'd actually use it — divide the history into rolling segments; on each segment, the system automatically picks the best settings using only that segment's early "training" data, then tests that choice on the following untouched "test" period. Every result you see is out-of-sample (settings were never tuned on it), so it's a realistic estimate of live performance.
+
+```bash
+python thermaltrend/walk_forward.py --strategy ma_crossover --tickers AAPL MSFT \
+    --start 2015-01-01 \
+    --grid '{"fast_period": [5, 10, 20, 50], "slow_period": [100, 200]}'
+```
+
+The output shows, for each test window: the settings that won in the preceding training window, the training (in-sample) Sharpe, and the actual achieved (out-of-sample) Sharpe — plus the **IS→OOS decay**: how much performance drops going from optimized to real conditions. Big decay = the settings were overfitted; small or positive decay = the strategy's edge is real. Add `--universe point_in_time` to combine with the survivorship-bias correction above.
+
 ---
 
 ## 5. Comparing Strategies
