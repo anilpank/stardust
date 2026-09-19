@@ -90,6 +90,22 @@ STRATEGY_DESCRIPTIONS = {
 DUAL_MOMENTUM_LABEL = "Dual Mom 126d"
 BENCHMARK_TICKER = "SPY"
 
+# Forced dark palette. Backgrounds and text colors are set explicitly so the
+# sidebar and metric cards stay readable even if Streamlit's theme detection
+# falls back to the light default.
+CUSTOM_CSS = """
+<style>
+.stMetric > div { background: rgba(28,33,39,0.6); border-radius: 8px; padding: 12px; }
+:root { color-scheme: dark; }
+[data-testid="stSidebar"] {
+    background-color: #262d38;
+    border-right: 1px solid #3a4350;
+}
+[data-testid="stSidebarContent"] { color: #f0f0f0; }
+[data-testid="stSidebar"] * { color: #f0f0f0; }
+</style>
+"""
+
 ALL_TICKERS = sorted(p.stem for p in Path(DEFAULT_DATA_DIR).glob("*.parquet") if p.stem != "SPY")
 
 UNIVERSE_CHOICES = ["current", "point_in_time"]
@@ -835,18 +851,7 @@ def main():
         initial_sidebar_state="expanded",
     )
 
-    st.markdown("""
-    <style>
-    .stMetric > div { background: rgba(28,33,39,0.6); border-radius: 8px; padding: 12px; }
-    :root { color-scheme: dark; }
-    [data-testid="stSidebar"] {
-        background-color: #262d38;
-        border-right: 1px solid #3a4350;
-    }
-    [data-testid="stSidebarContent"] { color: #f0f0f0; }
-    [data-testid="stSidebar"] * { color: #f0f0f0; }
-    </style>
-    """, unsafe_allow_html=True)
+    st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 
     strategy_name = "MA 50/200"
     tickers = ["AAPL", "MSFT", "GOOGL"]
