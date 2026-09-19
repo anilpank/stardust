@@ -47,10 +47,11 @@ thermaltrend/
 ├── signal_store.py                # Persist, query, and annotate signals
 ├── signals.py                     # Generate trading signals (with --save)
 ├── walk_forward.py                # Walk-forward (rolling out-of-sample) validation
+├── ticker_search.py               # Company-name → ticker lookup for the dashboard
 ├── dashboard.py                   # Streamlit dashboard: backtests, signals, comparisons,
 │                                  #   Data Explorer, Compare Tickers
 ├── charts.py                      # Plotly chart builders used by the dashboard
-└── tests/                         # 492 tests across 28 files (460 fast unit + 32 integration)
+└── tests/                         # 557 tests across 29 files (525 fast unit + 32 integration)
 ```
 
 ## Running Scripts
@@ -447,7 +448,7 @@ A Streamlit dashboard wraps the full workflow in a point-and-click interface:
 streamlit run thermaltrend/dashboard.py
 ```
 
-Tabs: Overview (metric cards, equity curve, drawdown, P&L distribution, price & signals), Trades, Per-Ticker, Regime, Signals, Compare, Saved Runs, plus standalone Data Explorer and Compare Tickers pages. Dual Momentum is fully supported — SPY is auto-added as its benchmark. A **Universe** selector in the sidebar switches between current-member and point-in-time universes. See `USER_GUIDE.md` Section 10 for a walkthrough.
+Tabs: Overview (metric cards, equity curve, drawdown, P&L distribution, price & signals), Trades, Per-Ticker, Regime, Signals, Compare, Saved Runs, plus standalone Data Explorer and Compare Tickers pages. Dual Momentum is fully supported — SPY is auto-added as its benchmark. A **Universe** selector in the sidebar switches between current-member and point-in-time universes. All ticker pickers accept **company names** in addition to ticker symbols — type "Apple" or "Bank of America" and the list narrows to the matching stocks (`ticker_search.py` resolves names offline from `membership.csv`). See `USER_GUIDE.md` Section 10 for a walkthrough.
 
 ## Running Tests
 

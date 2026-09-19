@@ -107,6 +107,70 @@ class TestDashboardConstants:
         assert ALL_TICKERS == sorted(ALL_TICKERS)
 
 
+class TestTickerLabels:
+    """The pickers show \"TICKER — Company Name\" labels so Streamlit's
+    native type-ahead autocomplete doubles as company-name search."""
+
+    def test_label_includes_company_name(self):
+        from thermaltrend.dashboard import _ticker_label
+        assert _ticker_label("AAPL") == "AAPL — Apple Inc."
+
+    def test_label_includes_brand_alias(self):
+        from thermaltrend.dashboard import _ticker_label
+        assert "Facebook" in _ticker_label("META")
+
+    def test_options_cover_all_tickers(self):
+        from thermaltrend.dashboard import ALL_TICKERS, _ticker_options
+        assert len(_ticker_options()) == len(ALL_TICKERS)
+
+    def test_options_unique(self):
+        from thermaltrend.dashboard import _ticker_options
+        options = _ticker_options()
+        assert len(options) == len(set(options))
+
+    def test_spy_not_in_options(self):
+        from thermaltrend.dashboard import _ticker_options
+        assert all(not label.startswith("SPY — ") for label in _ticker_options())
+
+    def test_defaults_use_labels(self):
+        from thermaltrend.dashboard import _ticker_options
+        assert _ticker_options(["AAPL", "MSFT", "GOOGL"]) == [
+            "AAPL — Apple Inc.",
+            "MSFT — Microsoft",
+            "GOOGL — Alphabet Inc. (Class A) (Google)",
+        ]
+
+    def test_empty_list_is_honored(self):
+        from thermaltrend.dashboard import _ticker_options
+        assert _ticker_options([]) == []
+
+    def test_options_follow_requested_order(self):
+        from thermaltrend.dashboard import _ticker_options
+        assert _ticker_options(["F", "A"])[0] == "F — Ford Motor Company"
+
+    def test_parse_reformats_to_same_label(self):
+        from thermaltrend.dashboard import _ticker_label, _ticker_options
+        from thermaltrend.ticker_search import parse_ticker_from_label
+        for label in _ticker_options():
+            ticker = parse_ticker_from_label(label)
+            assert _ticker_label(ticker) == label
+
+    def test_all_option_labels_roundtrip_to_all_tickers(self):
+        from thermaltrend.dashboard import ALL_TICKERS, _ticker_options
+        from thermaltrend.ticker_search import parse_ticker_from_label
+        parsed = [parse_ticker_from_label(label) for label in _ticker_options()]
+        assert parsed == ALL_TICKERS
+
+    def test_selected_tickers_roundtrip(self):
+        from thermaltrend.dashboard import _selected_tickers
+        labels = ["AAPL — Apple Inc.", "BRK-B — Berkshire Hathaway"]
+        assert _selected_tickers(labels) == ["AAPL", "BRK-B"]
+
+    def test_selected_tickers_parses_brand_alias_label(self):
+        from thermaltrend.dashboard import _selected_tickers
+        assert _selected_tickers(["META — Meta Platforms (Facebook)"]) == ["META"]
+
+
 class TestResolveFeedTickers:
     """Dual Momentum needs its benchmark bars in the feed even though it
     never trades them. The dashboard ticker picker excludes SPY by design,

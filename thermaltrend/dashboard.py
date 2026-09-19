@@ -45,6 +45,7 @@ from thermaltrend.core.strategy import (
 )
 from thermaltrend.feed import DataFeed
 from thermaltrend.signal_store import SignalStore
+from thermaltrend.ticker_search import format_ticker_label, parse_ticker_from_label
 
 DEFAULT_DATA_DIR = str(Path(__file__).parent / "data" / "equities")
 DEFAULT_REMOVED_DATA_DIR = str(Path(__file__).parent / "data" / "equities_removed")
@@ -123,6 +124,30 @@ ul[data-baseweb="menu"] li {
 ALL_TICKERS = sorted(p.stem for p in Path(DEFAULT_DATA_DIR).glob("*.parquet") if p.stem != "SPY")
 
 UNIVERSE_CHOICES = ["current", "point_in_time"]
+
+
+def _ticker_label(ticker: str) -> str:
+    """Dropdown label, e.g. ``AAPL — Apple Inc.``.
+
+    Showing the company name next to the symbol gives Streamlit's native
+    type-ahead autocomplete company-name searching for free — click the
+    multiselect/selectbox and start typing "Apple" or "Bank of America".
+    """
+    return format_ticker_label(ticker)
+
+
+def _ticker_options(tickers: list[str] | None = None) -> list[str]:
+    """Labels for the given tickers, or every selectable ticker when None
+    (ALL_TICKERS excludes SPY by design; the benchmark is injected
+    automatically for Dual Momentum)."""
+    if tickers is None:
+        tickers = ALL_TICKERS
+    return [_ticker_label(t) for t in tickers]
+
+
+def _selected_tickers(labels: list[str]) -> list[str]:
+    """Convert selected option labels back to ticker symbols."""
+    return [parse_ticker_from_label(label) for label in labels]
 
 
 def build_feed(
@@ -593,7 +618,10 @@ def _filter_by_preset(df: pd.DataFrame, preset: str) -> pd.DataFrame:
 def page_data_explorer():
     st.subheader("Data Explorer")
 
-    explorer_ticker = st.selectbox("Ticker", ALL_TICKERS, index=0, key="explorer_ticker")
+    explorer_options = _ticker_options()
+    explorer_ticker = parse_ticker_from_label(
+        st.selectbox("Ticker", explorer_options, index=0, key="explorer_ticker")
+    )
     preset = st.radio("Period", list(DATE_PRESETS.keys()), index=5, horizontal=True, key="explorer_preset")
     use_custom = st.checkbox("Custom date range", key="explorer_custom")
     if use_custom:
@@ -638,9 +666,13 @@ def page_data_explorer():
 def page_compare_tickers():
     st.subheader("Compare Tickers")
 
-    compare_tickers = st.multiselect(
-        "Tickers to Compare", ALL_TICKERS,
-        default=["AAPL", "MSFT", "GOOGL"], key="compare_tickers",
+    compare_tickers = _selected_tickers(
+        st.multiselect(
+            "Tickers to Compare",
+            _ticker_options(),
+            default=_ticker_options(["AAPL", "MSFT", "GOOGL"]),
+            key="compare_tickers",
+        )
     )
     cmp_preset = st.radio("Period", list(DATE_PRESETS.keys()), index=5, horizontal=True, key="cmp_preset")
     cmp_custom = st.checkbox("Custom date range", key="cmp_custom")
@@ -900,10 +932,14 @@ def main():
             strategy_name = st.selectbox("Strategy", list(STRATEGY_REGISTRY.keys()), index=0)
             st.caption(STRATEGY_DESCRIPTIONS[strategy_name])
 
-            tickers = st.multiselect(
-                "Tickers",
-                ALL_TICKERS,
-                default=["AAPL", "MSFT", "GOOGL"],
+            tickers = _selected_tickers(
+                st.multiselect(
+                    "Tickers",
+                    _ticker_options(),
+                    default=_ticker_options(["AAPL", "MSFT", "GOOGL"]),
+                    help="Click and start typing a company name (e.g. 'Apple' or "
+                         "'Bank of America') — matching stocks autocomplete below.",
+                )
             )
 
             universe = st.selectbox(
