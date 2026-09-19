@@ -342,3 +342,62 @@ class TestRunStrategyAnalysisSignals:
         assert "signals" in result
         assert isinstance(result["signals"], list)
         assert len(result["signals"]) == len(signals)
+
+
+class TestCustomCss:
+    """The dashboard injects a forced dark palette via CUSTOM_CSS. These tests
+    pin the sidebar readability rules so text never renders dark-on-dark."""
+
+    @staticmethod
+    def _hex_to_rgb(hex_color):
+        hex_color = hex_color.lstrip("#")
+        if len(hex_color) == 3:
+            hex_color = "".join(c * 2 for c in hex_color)
+        return tuple(int(hex_color[i : i + 2], 16) / 255 for i in (0, 2, 4))
+
+    @staticmethod
+    def _luminance(hex_color):
+        def linearize(c):
+            return c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
+
+        r, g, b = (linearize(c) for c in TestCustomCss._hex_to_rgb(hex_color))
+        return 0.2126 * r + 0.7152 * g + 0.0722 * b
+
+    @classmethod
+    def _contrast_ratio(cls, a, b):
+        la, lb = sorted((cls._luminance(a), cls._luminance(b)), reverse=True)
+        return (la + 0.05) / (lb + 0.05)
+
+    def test_sidebar_rule_present(self):
+        from thermaltrend.dashboard import CUSTOM_CSS
+        assert '[data-testid="stSidebar"]' in CUSTOM_CSS
+
+    def test_sidebar_background_color_set(self):
+        from thermaltrend.dashboard import CUSTOM_CSS
+        import re
+        match = re.search(r'background-color:\s*(#[0-9a-fA-F]{3,8})', CUSTOM_CSS)
+        assert match is not None, "no explicit sidebar background color"
+        assert TestCustomCss._luminance(match.group(1)) < 0.2, "sidebar bg must be dark"
+
+    def test_sidebar_text_color_set(self):
+        from thermaltrend.dashboard import CUSTOM_CSS
+        import re
+        match = re.search(r'\[data-testid="stSidebarContent"\][^{]*\{\s*color:\s*(#[0-9a-fA-F]{3,8})', CUSTOM_CSS)
+        assert match is not None, "no explicit sidebar text color"
+        assert TestCustomCss._luminance(match.group(1)) > 0.5, "sidebar text must be light"
+
+    def test_sidebar_text_forced_on_all_children(self):
+        from thermaltrend.dashboard import CUSTOM_CSS
+        assert '[data-testid="stSidebar"] * { color:' in CUSTOM_CSS
+
+    def test_sidebar_contrast_meets_wcag_aa(self):
+        from thermaltrend.dashboard import CUSTOM_CSS
+        import re
+        bg = re.search(r'background-color:\s*(#[0-9a-fA-F]{3,8})', CUSTOM_CSS)
+        fg = re.search(r'\[data-testid="stSidebarContent"\][^{]*\{\s*color:\s*(#[0-9a-fA-F]{3,8})', CUSTOM_CSS)
+        ratio = TestCustomCss._contrast_ratio(bg.group(1), fg.group(1))
+        assert ratio >= 4.5, f"sidebar contrast {ratio:.2f}:1 below WCAG AA (4.5:1)"
+
+    def test_dark_color_scheme_forced(self):
+        from thermaltrend.dashboard import CUSTOM_CSS
+        assert "color-scheme: dark" in CUSTOM_CSS
