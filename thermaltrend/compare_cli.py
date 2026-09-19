@@ -21,6 +21,7 @@ from thermaltrend.core.strategy import (
     ATRTrailingStopStrategy,
     DonchianBreakoutStrategy,
     DualMomentumStrategy,
+    FactorScoringStrategy,
     MACrossoverStrategy,
     RSIMeanReversionStrategy,
 )
@@ -38,6 +39,7 @@ STRATEGY_REGISTRY = {
     "rsi_mean_reversion": {"cls": RSIMeanReversionStrategy, "label": "RSI 14", "params": {}},
     "atr_trailing_stop": {"cls": ATRTrailingStopStrategy, "label": "ATR Trail 20/14/3", "params": {}},
     "dual_momentum": {"cls": DualMomentumStrategy, "label": "Dual Mom 126d", "params": {}},
+    "factor_scoring": {"cls": FactorScoringStrategy, "label": "Factor 126d", "params": {}},
 }
 
 

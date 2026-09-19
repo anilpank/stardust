@@ -31,6 +31,7 @@ from thermaltrend.core.strategy import (
     ATRTrailingStopStrategy,
     DonchianBreakoutStrategy,
     DualMomentumStrategy,
+    FactorScoringStrategy,
     MACrossoverStrategy,
     RSIMeanReversionStrategy,
 )
@@ -41,6 +42,18 @@ DEFAULT_REMOVED_DATA_DIR = str(Path(__file__).parent / "data" / "equities_remove
 DEFAULT_MEMBERSHIP_PATH = str(Path(__file__).parent / "data" / "equities" / "membership.csv")
 
 UNIVERSE_CHOICES = ["current", "point_in_time"]
+
+_FACTOR_SCORING_DEFAULTS = {
+    "momentum_lookback": 126,
+    "volatility_lookback": 60,
+    "trend_fast": 20,
+    "trend_slow": 60,
+    "reversion_lookback": 10,
+    "window": 252,
+    "entry_threshold": 0.60,
+    "exit_threshold": 0.50,
+    "absolute_momentum": True,
+}
 
 STRATEGIES = {
     "ma_crossover": lambda params=None: MACrossoverStrategy(
@@ -57,6 +70,9 @@ STRATEGIES = {
     ),
     "dual_momentum": lambda params=None: DualMomentumStrategy(
         **(params or {"lookback": 126, "benchmark_ticker": "SPY"})
+    ),
+    "factor_scoring": lambda params=None: FactorScoringStrategy(
+        **(params or _FACTOR_SCORING_DEFAULTS)
     ),
 }
 

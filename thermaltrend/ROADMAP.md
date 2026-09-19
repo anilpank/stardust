@@ -16,7 +16,7 @@ Working pipeline: **DataFeed → DataEngine → Strategy → SignalEvents → Tr
 | Strategy Engine (Strategy ABC + MACrossoverStrategy) | Built |
 | Signals CLI (`signals.py`) | Built |
 | Analytics & Metrics | Built |
-| Strategy Library (multi-class) | 5 of ~6 strategies |
+| Strategy Library (multi-class) | 6 strategies built |
 | Backtest CLI (`backtest.py`) | Built |
 | Compare CLI (`compare_cli.py`) | Built |
 | Signal Persistence (`signal_store.py`) | Built |
@@ -29,7 +29,7 @@ Working pipeline: **DataFeed → DataEngine → Strategy → SignalEvents → Tr
 | Portfolio & Risk | Not built |
 | Execution Handler | Not built |
 
-Source: ~5,550 lines across 23 modules. Tests: ~6,600 lines across 27 files (473 tests; 441 fast unit + 32 integration).
+Source: ~6,850 lines across 24 modules. Tests: ~6,950 lines across 28 files (492 tests; 460 fast unit + 32 integration).
 
 ---
 
@@ -71,7 +71,7 @@ thermaltrend/analytics/
 
 ## Recommended Build Order (Updated)
 
-### Phase 3: Strategy Library (5 of 6 built)
+### Phase 3: Strategy Library (6 of 6 built)
 
 You need multiple strategies to have anything meaningful to compare. Build simplest first — each teaches something about the framework's flexibility.
 
@@ -82,7 +82,7 @@ You need multiple strategies to have anything meaningful to compare. Build simpl
 | 3 | RSI Mean Reversion | Mean Reversion | Tests a completely different regime (sideways markets) | Done |
 | 4 | ATR Trailing Stop | Trend | Volatility-based risk management | Done |
 | 5 | Dual Momentum | Momentum | Absolute + relative momentum vs benchmark (SPY). Benchmark series learned from event stream — CLI needs SPY in the ticker list; the dashboard injects it automatically. Default lookback 126 days. | Done |
-| 6 | Simple Factor Scoring | Factor | Multi-signal composite rank | Medium-High |
+| 6 | Simple Factor Scoring | Factor | Multi-signal composite rank | Done |
 
 ```
 thermaltrend/
@@ -149,7 +149,7 @@ thermaltrend/
 ```
 Phase 2 (done)      →  analytics/metrics.py + report.py + trade_simulator.py + regime.py + compare.py
 Phase 2 cont (done) →  signal_store.py + backtest.py + compare_cli.py (persistence + CLI tools)
-Phase 3 (nearly done) → 5 of 6 strategies built; factor scorer next
+Phase 3 (done)      →  6 strategies built (MA, Donchian, RSI, ATR, Dual Momentum, Factor Scoring)
 Phase 3a (done)     →  per-period breakdown (monthly/quarterly/yearly) in metrics + report + CLI
 Phase 3b (done)     →  Streamlit dashboard (dashboard.py, charts.py): Overview, Trades, Per-Ticker,
                        Regime, Signals, Compare, Saved Runs, Data Explorer, Compare Tickers tabs;
@@ -160,9 +160,15 @@ Phase 3c (done)     →  survivorship-bias correction: membership.csv + data/equ
 Phase 3d (done)     →  walk-forward (rolling out-of-sample) validation: walk_forward.py —
                        per-window grid optimization on TRAIN, scoring on held-out TEST,
                        concatenated OOS equity curve + IS→OOS decay; --universe supported
+Phase 3e (done)     →  Simple Factor Scoring (factor_scoring) — the last strategy in Phase 3:
+                       momentum, low-vol, and trend factors z-score-normalized per ticker into a
+                       [0,1] composite (weights {momentum 0.4, low_vol 0.3, trend 0.3, reversal 0.0}),
+                       entry on 0.60 cross-up (+ optional absolute-momentum gate), exit on 0.50
+                       cross-down or momentum failure; wired into backtest/compare/signals,
+                       the dashboard (Factor 126d), and walk-forward (_max_lookback 378)
 Phase 4 (next)      →  portfolio/ package (position sizing, PnL)
 Phase 5 (later)     →  execution/ (OrderEvent, FillEvent, simulated fills)
 Phase 6 (future)    →  live broker bridge
 ```
 
-**Next up:** Simple Factor Scoring (multi-signal composite rank) — the last strategy in Phase 3. Then Phase 4: the `portfolio/` package (position sizing, risk limits).
+**Next up:** Phase 4: the `portfolio/` package (position sizing, risk limits).

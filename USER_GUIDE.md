@@ -31,7 +31,7 @@ Thermaltrend helps you answer three questions:
 
 Plus, explore 50+ years of stock price data with interactive charts, compare any stocks visually, and drill down on price action — all from your browser.
 
-The 4 built-in strategies are:
+The 6 built-in strategies are:
 
 | Strategy | What It Does | Best In |
 |----------|-------------|---------|
@@ -40,6 +40,7 @@ The 4 built-in strategies are:
 | **RSI Mean Reversion** (14) | Buys when stock is oversold and starts recovering | Sideways/choppy markets |
 | **ATR Trailing Stop** (20/14/3) | Buys on breakout, exits via volatility-adaptive trailing stop | Trending markets with volatility |
 | **Dual Momentum** (126d vs SPY) | Buys when a stock's 6-month return is positive AND beats SPY's | Stock-picking across full cycles |
+| **Factor Scoring** (126d) | Combines momentum, low volatility, and trend into a 0-1 score per stock; buys when a stock scores high vs its own history | Markets with sustained trends |
 
 Note: Dual Momentum compares each stock against SPY. In the **dashboard**, SPY is added automatically as the benchmark — no action needed. On the **command line**, include SPY in your ticker selection.
 
@@ -181,6 +182,7 @@ python thermaltrend/backtest.py --strategy ma_crossover --tickers AAPL MSFT --st
 | `--strategy rsi_mean_reversion` | RSI Mean Reversion (14-period) |
 | `--strategy atr_trailing_stop` | ATR Trailing Stop (20/14/3) |
 | `--strategy dual_momentum` | Dual Momentum (126d return vs SPY — include SPY in tickers) |
+| `--strategy factor_scoring` | Factor Scoring (momentum, low-vol, trend composite; 0-1 score per stock) |
 
 ### Backtest With the Point-in-Time Universe (Survivorship-Bias Free)
 
@@ -205,6 +207,14 @@ A single backtest overfits: you tune a strategy on the whole history, then measu
 python thermaltrend/walk_forward.py --strategy ma_crossover --tickers AAPL MSFT \
     --start 2015-01-01 \
     --grid '{"fast_period": [5, 10, 20, 50], "slow_period": [100, 200]}'
+```
+
+Factor Scoring needs a long warmup (~378 bars ≈ 1.5 years of daily data) before its first signal, so give it more history:
+
+```bash
+python thermaltrend/walk_forward.py --strategy factor_scoring --tickers AAPL MSFT \
+    --start 1990-01-01 \
+    --grid '{"momentum_lookback": [63, 126], "window": [126, 252]}'
 ```
 
 The output shows, for each test window: the settings that won in the preceding training window, the training (in-sample) Sharpe, and the actual achieved (out-of-sample) Sharpe — plus the **IS→OOS decay**: how much performance drops going from optimized to real conditions. Big decay = the settings were overfitted; small or positive decay = the strategy's edge is real. Add `--universe point_in_time` to combine with the survivorship-bias correction above.
@@ -409,7 +419,7 @@ Run `python update_data.py` to make sure your data is current.
 
 ### "Unknown strategy" error
 
-Check the strategy name. Available: `ma_crossover`, `donchian`, `rsi_mean_reversion`, `atr_trailing_stop`, `dual_momentum`
+Check the strategy name. Available: `ma_crossover`, `donchian`, `rsi_mean_reversion`, `atr_trailing_stop`, `dual_momentum`, `factor_scoring`
 
 ### Signals seem wrong
 
@@ -547,7 +557,7 @@ Generate and save trading signals without leaving the browser.
 
 ### Tab: Compare
 
-Run all 5 strategies on your selected stocks and rank them.
+Run all 6 strategies on your selected stocks and rank them.
 
 1. Choose a metric to **Rank by** (Sharpe is the default — it's the best single measure of strategy quality)
 2. Click **Run Comparison**

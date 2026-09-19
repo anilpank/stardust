@@ -39,6 +39,7 @@ from thermaltrend.core.strategy import (
     ATRTrailingStopStrategy,
     DonchianBreakoutStrategy,
     DualMomentumStrategy,
+    FactorScoringStrategy,
     MACrossoverStrategy,
     RSIMeanReversionStrategy,
 )
@@ -55,6 +56,7 @@ STRATEGY_REGISTRY = {
     "RSI 14": RSIMeanReversionStrategy,
     "ATR Trail 20/14/3": ATRTrailingStopStrategy,
     "Dual Mom 126d": DualMomentumStrategy,
+    "Factor 126d": FactorScoringStrategy,
 }
 
 STRATEGY_DEFAULTS = {
@@ -63,6 +65,17 @@ STRATEGY_DEFAULTS = {
     "RSI 14": {"period": 14, "oversold": 30.0, "overbought": 70.0},
     "ATR Trail 20/14/3": {"entry_period": 20, "atr_period": 14, "atr_multiple": 3.0},
     "Dual Mom 126d": {"lookback": 126, "benchmark_ticker": "SPY"},
+    "Factor 126d": {
+        "momentum_lookback": 126,
+        "volatility_lookback": 60,
+        "trend_fast": 20,
+        "trend_slow": 60,
+        "reversion_lookback": 10,
+        "window": 252,
+        "entry_threshold": 0.60,
+        "exit_threshold": 0.50,
+        "absolute_momentum": True,
+    },
 }
 
 STRATEGY_DESCRIPTIONS = {
@@ -71,6 +84,7 @@ STRATEGY_DESCRIPTIONS = {
     "RSI 14": "Buys when RSI bounces off oversold (30). Sells when it drops from overbought (70). Best for range-bound markets.",
     "ATR Trail 20/14/3": "Buys on 20-day breakout, exits via ATR-based trailing stop that ratchets up. Lets winners run while protecting gains.",
     "Dual Mom 126d": "Buys when a stock's lookback return is positive AND beats the benchmark's return. Sells when either condition fails. SPY is added automatically as the benchmark.",
+    "Factor 126d": "Combines momentum, low volatility, and trend into a single 0-1 score per stock. Buys when a stock's score is strong vs its own history; sells when it weakens. Robust across market conditions.",
 }
 
 DUAL_MOMENTUM_LABEL = "Dual Mom 126d"
@@ -908,6 +922,22 @@ def main():
                     params["lookback"] = st.number_input("Lookback (trading days)", 10, 252, 126)
                     benchmark = st.text_input("Benchmark ticker", BENCHMARK_TICKER).strip().upper()
                     params["benchmark_ticker"] = benchmark or BENCHMARK_TICKER
+                elif strategy_name == "Factor 126d":
+                    params["momentum_lookback"] = st.number_input(
+                        "Momentum lookback (days)", 20, 504, 126
+                    )
+                    params["volatility_lookback"] = st.number_input(
+                        "Volatility lookback (days)", 10, 252, 60
+                    )
+                    params["entry_threshold"] = st.number_input(
+                        "Entry threshold", 0.0, 1.0, 0.60, 0.05
+                    )
+                    params["exit_threshold"] = st.number_input(
+                        "Exit threshold", 0.0, 1.0, 0.50, 0.05
+                    )
+                    params["absolute_momentum"] = st.checkbox(
+                        "Require positive momentum to buy", True
+                    )
 
             run_backtest = tab_choice not in ("Compare", "Saved Runs", "Best Strategy")
 

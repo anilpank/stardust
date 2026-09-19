@@ -162,11 +162,11 @@ The system is strategy-agnostic. Strategies across multiple classes can be plugg
 ### Trend Following
 1. **Moving Average Crossover** (SMA/EMA golden cross) ✅
 2. **Donchian Channel Breakout** (new highs -> entry, channel low -> exit) ✅
-3. **ATR Trailing Stop** (trend entry + volatility-based trailing stop)
+3. **ATR Trailing Stop** (trend entry + volatility-based trailing stop) ✅
 4. **Adaptive Moving Average** (Kaufman's KAMA)
 
 ### Momentum
-5. **Dual Momentum** (absolute + relative momentum across sector ETFs)
+5. **Dual Momentum** (absolute + relative momentum across sector ETFs) ✅
 6. **Sector Rotation** (momentum-based ranking across SPDR sectors)
 7. **RSI Momentum** (RSI-based trend continuation entries)
 
@@ -175,7 +175,7 @@ The system is strategy-agnostic. Strategies across multiple classes can be plugg
 9. **Bollinger Band Bounce** (revert to mean after band touch)
 
 ### Factor-Based
-10. **Simple Factor Scoring** (value, quality, low-vol composite rank)
+10. **Simple Factor Scoring** (momentum, low-vol, trend composite rank) ✅
 
 ### Baseline
 - **S&P 500 Buy-and-Hold** — benchmark to beat

@@ -58,6 +58,19 @@ STRATEGY_DEFAULTS = {
     "rsi_mean_reversion": {"period": 14, "oversold": 30.0, "overbought": 70.0},
     "atr_trailing_stop": {"entry_period": 20, "atr_period": 14, "atr_multiple": 3.0},
     "dual_momentum": {"lookback": 126, "benchmark_ticker": "SPY"},
+    # window (252) + momentum_lookback (126) = 378 bars before the first signal.
+    # weights is a nested dict — not grid-searchable; keep it fixed.
+    "factor_scoring": {
+        "momentum_lookback": 126,
+        "volatility_lookback": 60,
+        "trend_fast": 20,
+        "trend_slow": 60,
+        "reversion_lookback": 10,
+        "window": 252,
+        "entry_threshold": 0.6,
+        "exit_threshold": 0.5,
+        "absolute_momentum": True,
+    },
 }
 
 # Strategy parameters that gate a strategy's first signal by lookback. Used to
@@ -68,6 +81,7 @@ STRATEGY_LOOKBACK_KEYS = {
     "rsi_mean_reversion": ["period"],
     "atr_trailing_stop": ["entry_period", "atr_period"],
     "dual_momentum": ["lookback"],
+    "factor_scoring": ["momentum_lookback", "window"],
 }
 
 OBJECTIVE_CHOICES = [
@@ -177,6 +191,8 @@ def _max_lookback(strategy_name: str) -> int:
         "rsi_mean_reversion": 14,
         "atr_trailing_stop": 20,
         "dual_momentum": 126,
+        # Requires a full normalization window + biggest factor lookback.
+        "factor_scoring": 378,
     }
     return lookbacks.get(strategy_name, 0)
 

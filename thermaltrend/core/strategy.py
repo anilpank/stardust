@@ -6,6 +6,7 @@ Each strategy is stateful — it maintains internal state (e.g., price history,
 indicator values) across calls to on_market().
 """
 
+import math
 from abc import ABC, abstractmethod
 
 from thermaltrend.core.events import MarketEvent, SignalDirection, SignalEvent
@@ -578,3 +579,284 @@ class DualMomentumStrategy(Strategy):
                 )
 
         return None
+
+
+FACTOR_NAMES = ("momentum", "low_vol", "trend", "reversal")
+
+
+class FactorScoringStrategy(Strategy):
+    """Multi-factor composite score strategy.
+
+    Combines four price-derived factors — momentum, low volatility, trend, and
+    (optional) short-term reversal — into a single composite score in [0, 1].
+    Each factor is normalized against the ticker's OWN rolling history (a
+    trailing z-score, clipped to [-2, 2] and scaled to [0, 1]), so the score
+    depends only on the ticker's past data. That makes it lookahead-safe within
+    the event stream (no reliance on the same-day cross-section) while still
+    being comparable across tickers for ranking in reports.
+
+    Trading rules per ticker (a state machine, like Dual Momentum):
+
+    - Flat → BUY when the composite score *crosses up* through ``entry_threshold``
+      and, if ``absolute_momentum`` is set, the ticker's lookback return is positive.
+    - In position → SELL when the composite score *crosses down* through
+      ``exit_threshold`` or the absolute-momentum gate fails.
+    - The entry/exit hysteresis (default 0.60 > 0.50) reduces whipsaw.
+
+    ``weights`` must sum to a positive value; they are normalized to sum to 1.
+    Unknown factor names raise ValueError. The absolute-momentum gate always uses
+    the ``momentum_lookback`` return regardless of whether momentum is a weighted
+    factor, so it keeps working even when momentum's weight is zero.
+
+    Requires ``max(momentum, volatility, trend_slow, reversion lookbacks) + window``
+    bars of history before producing any signals (every weighted factor needs a
+    full rolling normalization window).
+    """
+
+    def __init__(
+        self,
+        momentum_lookback: int = 126,
+        volatility_lookback: int = 60,
+        trend_fast: int = 20,
+        trend_slow: int = 60,
+        reversion_lookback: int = 10,
+        window: int = 252,
+        weights: dict[str, float] | None = None,
+        entry_threshold: float = 0.60,
+        exit_threshold: float = 0.50,
+        absolute_momentum: bool = True,
+        strategy_id: str = "factor_scoring",
+    ) -> None:
+        self.momentum_lookback = momentum_lookback
+        self.volatility_lookback = volatility_lookback
+        self.trend_fast = trend_fast
+        self.trend_slow = trend_slow
+        self.reversion_lookback = reversion_lookback
+        self.window = window
+        self.entry_threshold = entry_threshold
+        self.exit_threshold = exit_threshold
+        self.absolute_momentum = absolute_momentum
+        self.strategy_id = strategy_id
+
+        weights = weights or {
+            "momentum": 0.4,
+            "low_vol": 0.3,
+            "trend": 0.3,
+            "reversal": 0.0,
+        }
+        unknown = set(weights) - set(FACTOR_NAMES)
+        if unknown:
+            raise ValueError(
+                f"Unknown factor(s) {', '.join(sorted(unknown))}. "
+                f"Known factors: {', '.join(FACTOR_NAMES)}"
+            )
+        total = sum(weights.get(f, 0.0) for f in FACTOR_NAMES)
+        if total <= 0:
+            raise ValueError("Factor weights must sum to a positive value")
+        self.weights = {f: weights.get(f, 0.0) / total for f in FACTOR_NAMES}
+        self._active = [f for f in FACTOR_NAMES if self.weights[f] > 0]
+
+        # Leading lookback is the largest window any raw factor needs before it
+        # can be computed — determines how much close history to keep.
+        self._max_lookback = max(
+            momentum_lookback, volatility_lookback, trend_slow, reversion_lookback
+        )
+        self._max_closes = self.window + self._max_lookback + 1
+
+        self._closes: dict[str, list[float]] = {}
+        self._raw: dict[str, dict[str, list[float]]] = {}
+        self._prev_score: dict[str, float | None] = {}
+        self._in_position: dict[str, bool] = {}
+
+    # ---- factor signals (pure functions of the ticker's close history) ----
+
+    def _momentum_return(self, closes: list[float]) -> float | None:
+        """Total return over ``momentum_lookback`` bars, or None if unknown."""
+        if len(closes) < self.momentum_lookback + 1:
+            return None
+        return closes[-1] / closes[-1 - self.momentum_lookback] - 1.0
+
+    def _raw_factor(self, factor: str, closes: list[float]) -> float | None:
+        """Compute a factor's raw value from the close history."""
+        if factor == "momentum":
+            return self._momentum_return(closes)
+        if factor == "trend":
+            if len(closes) < self.trend_slow + 1:
+                return None
+            fast = sum(closes[-self.trend_fast :]) / self.trend_fast
+            slow = sum(closes[-self.trend_slow :]) / self.trend_slow
+            return (fast - slow) / slow
+        if factor == "reversal":
+            if len(closes) < self.reversion_lookback + 1:
+                return None
+            ret = closes[-1] / closes[-1 - self.reversion_lookback] - 1.0
+            return -ret
+        if factor == "low_vol":
+            if len(closes) < self.volatility_lookback + 1:
+                return None
+            window_closes = closes[-self.volatility_lookback - 1 :]
+            n = len(window_closes) - 1
+            log_rets = [
+                math.log(window_closes[i] / window_closes[i - 1])
+                for i in range(1, len(window_closes))
+            ]
+            mean = sum(log_rets) / n
+            var = sum((r - mean) ** 2 for r in log_rets) / (n - 1)
+            return -math.sqrt(max(var, 0.0))
+        raise ValueError(f"Unknown factor '{factor}'")
+
+    @staticmethod
+    def _normalize(value: float, history: list[float]) -> float:
+        """Map a value to [0, 1] via a trailing z-score clipped to [-2, 2].
+
+        ``history`` is the trailing window including the current value. With a
+        degenerate window (std ~ 0) the factor is treated as neutral (0.5).
+        """
+        n = len(history)
+        if n < 2:
+            return 0.5
+        mean = sum(history) / n
+        variance = sum((v - mean) ** 2 for v in history) / (n - 1)
+        std = math.sqrt(variance)
+        if std < 1e-9:
+            return 0.5
+        z = max(-2.0, min(2.0, (value - mean) / std))
+        return (z + 2.0) / 4.0
+
+    def _factor_component(self, ticker: str, factor: str) -> tuple[float, float]:
+        """Return (z, u) for a factor where u = normalized [0, 1] component."""
+        hist = self._raw[ticker][factor]
+        value = hist[-1]
+        n = len(hist)
+        if n < 2:
+            return 0.0, 0.5
+        mean = sum(hist) / n
+        variance = sum((v - mean) ** 2 for v in hist) / (n - 1)
+        std = math.sqrt(variance)
+        if std < 1e-9:
+            return 0.0, 0.5
+        z = max(-2.0, min(2.0, (value - mean) / std))
+        return z, (z + 2.0) / 4.0
+
+    def _composite(self, ticker: str) -> float | None:
+        """Weighted sum of normalized active factors, or None before warmup."""
+        for factor in self._active:
+            if len(self._raw[ticker][factor]) < self.window:
+                return None
+        return sum(
+            self.weights[f] * self._factor_component(ticker, f)[1]
+            for f in self._active
+        )
+
+    # ---- event handler ----
+
+    def on_market(self, event: MarketEvent) -> SignalEvent | None:
+        ticker = event.ticker
+        if ticker not in self._closes:
+            self._closes[ticker] = []
+            self._raw[ticker] = {f: [] for f in FACTOR_NAMES}
+            self._prev_score[ticker] = None
+            self._in_position[ticker] = False
+
+        closes = self._closes[ticker]
+        closes.append(event.close)
+        if len(closes) > self._max_closes:
+            del closes[: len(closes) - self._max_closes]
+
+        for factor in self._active:
+            value = self._raw_factor(factor, closes)
+            if value is None:
+                continue
+            hist = self._raw[ticker][factor]
+            hist.append(value)
+            if len(hist) > self.window:
+                del hist[0]
+
+        score = self._composite(ticker)
+        if score is None:
+            self._prev_score[ticker] = None
+            return None
+
+        prev = self._prev_score[ticker]
+        self._prev_score[ticker] = score
+
+        momentum_ret = self._momentum_return(closes)
+        # The absolute-momentum gate uses the raw lookback return, independent
+        # of whether momentum is a weighted factor.
+        abs_pass = (
+            not self.absolute_momentum
+            or (momentum_ret is not None and momentum_ret > 0.0)
+        )
+
+        if not self._in_position[ticker]:
+            if (
+                prev is not None
+                and score > self.entry_threshold
+                and prev <= self.entry_threshold
+                and abs_pass
+            ):
+                self._in_position[ticker] = True
+                strength = min(
+                    (score - self.entry_threshold) / (1.0 - self.entry_threshold),
+                    1.0,
+                )
+                return SignalEvent(
+                    timestamp=event.timestamp,
+                    ticker=ticker,
+                    direction=SignalDirection.BUY,
+                    strength=round(max(strength, 0.01), 4),
+                    strategy_id=self.strategy_id,
+                    metadata=self._metadata(ticker, score, momentum_ret, True, abs_pass),
+                )
+        else:
+            exit_on_score = (
+                prev is not None
+                and score < self.exit_threshold
+                and prev >= self.exit_threshold
+            )
+            exit_on_gate = (
+                self.absolute_momentum and momentum_ret is not None and momentum_ret <= 0.0
+            )
+            if exit_on_score or exit_on_gate:
+                self._in_position[ticker] = False
+                if exit_on_score:
+                    strength = min(
+                        (self.exit_threshold - score) / self.exit_threshold, 1.0
+                    )
+                else:
+                    strength = min(-momentum_ret * 5.0, 1.0)
+                return SignalEvent(
+                    timestamp=event.timestamp,
+                    ticker=ticker,
+                    direction=SignalDirection.SELL,
+                    strength=round(max(strength, 0.01), 4),
+                    strategy_id=self.strategy_id,
+                    metadata=self._metadata(ticker, score, momentum_ret, False, abs_pass),
+                )
+
+        return None
+
+    def _metadata(
+        self,
+        ticker: str,
+        score: float,
+        momentum_ret: float | None,
+        entering: bool,
+        abs_pass: bool,
+    ) -> dict:
+        components = {}
+        for factor in self._active:
+            z, u = self._factor_component(ticker, factor)
+            components[factor] = {"z": round(z, 4), "u": round(u, 4)}
+        return {
+            "score": round(score, 4),
+            "entry_threshold": self.entry_threshold,
+            "exit_threshold": self.exit_threshold,
+            "momentum_return": (
+                round(momentum_ret, 6) if momentum_ret is not None else None
+            ),
+            "absolute_momentum": self.absolute_momentum,
+            "absolute_pass": abs_pass,
+            "factors": components,
+            "weights": {f: round(w, 4) for f, w in self.weights.items()},
+        }
