@@ -20,6 +20,7 @@ def test_package_importable():
         "thermaltrend.feed",
         "thermaltrend.analytics.compare",
         "thermaltrend.analytics.metrics",
+        "thermaltrend.ticker_search",
     ],
 )
 def test_submodules_importable(submodule):

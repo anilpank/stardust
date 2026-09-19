@@ -484,7 +484,7 @@ The sidebar adapts based on which tab you're on.
 |---------|-------------|
 | **Navigation** | Switch between tabs |
 | **Strategy** | Pick which strategy to run. A plain-English description appears below. |
-| **Tickers** | Pick which stocks to analyze. Start typing to search (e.g., type "AAPL"). |
+| **Tickers** | Pick which stocks to analyze. Click the box and start typing a company **name** or ticker — e.g. type "apple" and options filter to AAPL, "bank of america" to BAC — then click a match to select it. |
 | **Start / End** | Set the date range for your backtest. |
 | **Universe** | *Current members* (today's S&P 500) or *Point-in-time* (each stock is only traded during its actual S&P 500 membership). Choose **Point-in-time** for historic backtests to avoid survivorship bias. |
 | **Strategy Parameters** | Expand this to tweak strategy settings (e.g., change the RSI threshold). |
@@ -574,7 +574,7 @@ Browse signal runs you've saved (from the Signals tab or the command line). Sele
 
 View any stock's full price history with interactive charts — no backtest required.
 
-1. Select a **Ticker** from the dropdown (all 500+ S&P 500 stocks available)
+1. Click the **Ticker** dropdown and start typing a company **name** (e.g., "Nvidia") or ticker — matching options autocomplete as you type
 2. Choose a **Period** — quick presets (1M, 3M, 6M, 1Y, 3Y, 5Y, 10Y, Max) or check **Custom date range** for specific dates
 3. You'll see:
    - **Summary metrics** — Last Close, 52-Week High/Low, Average Volume, Total Return
@@ -590,7 +590,7 @@ View any stock's full price history with interactive charts — no backtest requ
 
 Compare multiple stocks side-by-side with normalized price charts — no backtest required.
 
-1. Select **Tickers to Compare** (start typing to search, e.g., "AAPL")
+1. Click **Tickers to Compare** and start typing a company **name** or ticker (e.g., "Nvidia" or "AAPL") — matching options autocomplete as you type
 2. Choose a **Period** (same presets as Data Explorer, or custom dates)
 3. You'll see:
    - **Normalized Price Chart** — All stocks start at 100, so you can visually compare relative performance. If AAPL ends at 150 and MSFT at 120, AAPL outperformed by 30%.

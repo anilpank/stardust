@@ -20,9 +20,9 @@ The data pipeline, event-driven engine, and analytics module are built. Data is 
 | Data range | 1970 → Aug 28 2026 (varies by ticker) |
 | Columns | Open, High, Low, Close, Volume (auto-adjusted) |
 | Strategies | 6 (MA Crossover, Donchian Breakout, RSI Mean Reversion, ATR Trailing Stop, Dual Momentum, Factor Scoring) |
-| Total source code | ~6,850 lines across 24 modules |
-| Total test code | ~6,950 lines across 28 test files (492 tests: 460 fast unit + 32 integration) |
-| Git commits | 66 |
+| Total source code | ~7,250 lines across 28 modules |
+| Total test code | ~7,260 lines across 29 test files (557 tests: 525 fast unit + 32 integration) |
+| Git commits | 86 |
 
 ## Scripts
 
@@ -220,7 +220,7 @@ python -m thermaltrend.signals --strategy dual_momentum --tickers AAPL MSFT SPY 
 python -m thermaltrend.signals --strategy factor_scoring --tickers AAPL MSFT --start 2024-01-01
 ```
 
-Test files (28 files, 492 tests: 460 fast unit + 32 integration):
+Test files (29 files, 557 tests: 525 fast unit + 32 integration):
 - `tests/test_events.py` — EventQueue, MarketEvent, SignalEvent
 - `tests/test_strategy.py` — all 6 strategies incl. DualMomentumStrategy
 - `tests/test_engine.py` — DataEngine integration
@@ -239,7 +239,8 @@ Test files (28 files, 492 tests: 460 fast unit + 32 integration):
 - `tests/test_backtest.py` — Backtest CLI + library (incl. all-strategies smoke test)
 - `tests/test_compare_cli.py` — Compare CLI + library
 - `tests/test_signal_store.py` — Signal persistence and annotation
-- `tests/test_dashboard.py` / `test_charts.py` — Dashboard registries/constants + `resolve_feed_tickers()` benchmark injection + chart builders
+- `tests/test_ticker_search.py` — Company-name → ticker lookup: case-insensitivity, tokens, punctuation, legal suffixes, brand/ticker aliases, class shares, limits, no-data members excluded
+- `tests/test_dashboard.py` / `test_charts.py` — Dashboard registries/constants + `resolve_feed_tickers()` benchmark injection + chart builders + `_searchable_options()` name-search feed for pickers
 - `tests/test_download_data.py`, `test_update_data.py`, `test_show_start_dates.py` (+ `*_integration.py` variants) — data pipeline (integration tests pass fixture dirs via `--data-dir`, not cwd)
 - `tests/test_hello.py` — import smoke tests
 
@@ -257,6 +258,7 @@ Pre-commit hook: `.pre-commit-config.yaml` runs `pytest -m "not slow" -q` on eve
 | `thermaltrend/compare_cli.py` | `run_compare()` library function + CLI — multi-strategy ranking with benchmark |
 | `thermaltrend/signal_store.py` | `SignalStore` class + CLI — persist, query, and annotate signals |
 | `thermaltrend/walk_forward.py` | Walk-forward validation — rolling train/test windows, grid optimization, OOS metrics + IS→OOS decay |
+| `thermaltrend/ticker_search.py` | Company-name → ticker lookup for the dashboard (offline, from `membership.csv`) |
 | `thermaltrend/signals.py` | Signal output CLI — runs strategy on data feed, outputs ranked trading signals (--save to persist) |
 | `thermaltrend/dashboard.py` | Streamlit dashboard — backtests, signals, compare, Data Explorer, Compare Tickers |
 | `thermaltrend/charts.py` | Plotly chart builders used by the dashboard |
