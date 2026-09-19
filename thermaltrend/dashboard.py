@@ -838,7 +838,13 @@ def main():
     st.markdown("""
     <style>
     .stMetric > div { background: rgba(28,33,39,0.6); border-radius: 8px; padding: 12px; }
-    [data-testid="stSidebar"] { background-color: #1a1d23; }
+    :root { color-scheme: dark; }
+    [data-testid="stSidebar"] {
+        background-color: #262d38;
+        border-right: 1px solid #3a4350;
+    }
+    [data-testid="stSidebarContent"] { color: #f0f0f0; }
+    [data-testid="stSidebar"] * { color: #f0f0f0; }
     </style>
     """, unsafe_allow_html=True)
 
