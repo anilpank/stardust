@@ -86,7 +86,7 @@ class TestTrafficLight:
 class TestDashboardConstants:
     def test_strategy_registry_keys(self):
         from thermaltrend.dashboard import STRATEGY_REGISTRY
-        expected = {"MA 50/200", "Donchian 20/10", "RSI 14", "ATR Trail 20/14/3", "Dual Mom 126d"}
+        expected = {"MA 50/200", "Donchian 20/10", "RSI 14", "ATR Trail 20/14/3", "Dual Mom 126d", "Factor 126d"}
         assert set(STRATEGY_REGISTRY.keys()) == expected
 
     def test_strategy_defaults_match_registry(self):

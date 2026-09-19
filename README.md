@@ -50,7 +50,7 @@ thermaltrend/
 ├── dashboard.py                   # Streamlit dashboard: backtests, signals, comparisons,
 │                                  #   Data Explorer, Compare Tickers
 ├── charts.py                      # Plotly chart builders used by the dashboard
-└── tests/                         # 473 tests across 27 files (441 fast unit + 32 integration)
+└── tests/                         # 492 tests across 28 files (460 fast unit + 32 integration)
 ```
 
 ## Running Scripts
@@ -409,7 +409,7 @@ Event-driven design with 6 layers:
 
 1. **Data Layer** — download, update, inspect Parquet files + DataFeed
 2. **Event Queue** — MarketEvent → SignalEvent flow with strict chronological ordering
-3. **Strategy Engine** — Strategy ABC + 5 strategies: MA Crossover, Donchian Breakout, RSI Mean Reversion, ATR Trailing Stop, Dual Momentum
+3. **Strategy Engine** — Strategy ABC + 6 strategies: MA Crossover, Donchian Breakout, RSI Mean Reversion, ATR Trailing Stop, Dual Momentum, Factor Scoring
 4. **Analytics & Reporting** — Trade simulation, metrics, regime analysis, strategy ranking, signal persistence
 5. **Execution Handler** — simulated fills + live broker bridge (planned)
 6. **Portfolio & Risk** — position sizing, risk management (planned)

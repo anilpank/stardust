@@ -15,6 +15,7 @@ from thermaltrend.core.strategy import (
     ATRTrailingStopStrategy,
     DonchianBreakoutStrategy,
     DualMomentumStrategy,
+    FactorScoringStrategy,
     MACrossoverStrategy,
     RSIMeanReversionStrategy,
 )
@@ -33,6 +34,17 @@ STRATEGIES = {
         entry_period=20, atr_period=14, atr_multiple=3.0
     ),
     "dual_momentum": lambda: DualMomentumStrategy(lookback=126, benchmark_ticker="SPY"),
+    "factor_scoring": lambda: FactorScoringStrategy(
+        momentum_lookback=126,
+        volatility_lookback=60,
+        trend_fast=20,
+        trend_slow=60,
+        reversion_lookback=10,
+        window=252,
+        entry_threshold=0.60,
+        exit_threshold=0.50,
+        absolute_momentum=True,
+    ),
 }
 
 

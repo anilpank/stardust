@@ -2,7 +2,7 @@
 
 **Author:** Anil
 **Date:** July 2026
-**Status:** Phase 2-3 Complete (Data Layer + Event Queue + Signal Generation + Analytics + Signal Persistence + Backtest/Compare CLI + 5 strategies)
+**Status:** Phase 2-3 Complete (Data Layer + Event Queue + Signal Generation + Analytics + Signal Persistence + Backtest/Compare CLI + Walk-Forward + 6 strategies)
 
 ---
 
@@ -44,7 +44,7 @@ Six layers, four built:
 |-------|--------|------|
 | Data Layer | Built | Download, update, inspect Parquet files; `DataFeed` yields chronological bars |
 | Event Queue | Built | `MarketEvent` → `SignalEvent` flow via `EventQueue`; `DataEngine` orchestrates |
-| Strategy Engine | 5 strategies built | `Strategy` ABC + `MACrossoverStrategy`, `DonchianBreakoutStrategy`, `RSIMeanReversionStrategy`, `ATRTrailingStopStrategy`, `DualMomentumStrategy`; factor scoring planned |
+| Strategy Engine | 6 strategies built | `Strategy` ABC + `MACrossoverStrategy`, `DonchianBreakoutStrategy`, `RSIMeanReversionStrategy`, `ATRTrailingStopStrategy`, `DualMomentumStrategy`, `FactorScoringStrategy`; Phase 4 portfolio/ planned |
 | Analytics & Reporting | Built | Trade simulation, metrics, regime analysis, strategy ranking, benchmark comparison |
 | Execution Handler | Planned | Simulated fills, slippage models, live broker bridge |
 | Portfolio & Risk | Planned | Position sizing, risk rules, PnL tracking |
@@ -355,13 +355,17 @@ Six layers, four built:
 
 ## 6. What's Next
 
-### Phase 3: Strategy Expansion (Multi-Class) — 4 of 6 Complete
+### Phase 3: Strategy Expansion (Multi-Class) — 6 of 6 Complete
 Implement strategies across multiple classes to cast a wide net:
 - **Trend Following:** Donchian Channel Breakout ✅, ATR Trailing Stop ✅, Adaptive MA (KAMA)
-- **Momentum:** Dual Momentum (absolute + relative), Sector Rotation, RSI momentum
+- **Momentum:** Dual Momentum (absolute + relative) ✅, Sector Rotation, RSI momentum
 - **Mean Reversion:** RSI-based entries ✅, Bollinger Band bounce
-- **Factor-Based:** Simple value/quality/momentum factor scoring
+- **Factor-Based:** Simple Factor Scoring ✅ (momentum, low-vol, trend composite)
 - All strategies share the same `Strategy` ABC interface — plug and play.
+- Walk-forward validation (`walk_forward.py`) ✅ — rolling out-of-sample grid search
+
+### Phase 4 (next): Portfolio & Risk
+- `portfolio/` package — position sizing, portfolio-level PnL, risk limits
 
 ### Phase 2 (cont.): Signal Logging ← Built
 - `signal_store.py` — save signals to Parquet, query history, annotate actions

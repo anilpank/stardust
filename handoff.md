@@ -19,9 +19,9 @@ The data pipeline, event-driven engine, and analytics module are built. Data is 
 | Membership stints | 1,259 rows / 1,206 tickers in `data/equities/membership.csv` (503 current, 756 removed) |
 | Data range | 1970 → Aug 28 2026 (varies by ticker) |
 | Columns | Open, High, Low, Close, Volume (auto-adjusted) |
-| Strategies | 5 (MA Crossover, Donchian Breakout, RSI Mean Reversion, ATR Trailing Stop, Dual Momentum) |
-| Total source code | ~5,550 lines across 23 modules |
-| Total test code | ~6,600 lines across 27 test files (473 tests: 441 fast unit + 32 integration) |
+| Strategies | 6 (MA Crossover, Donchian Breakout, RSI Mean Reversion, ATR Trailing Stop, Dual Momentum, Factor Scoring) |
+| Total source code | ~6,850 lines across 24 modules |
+| Total test code | ~6,950 lines across 28 test files (492 tests: 460 fast unit + 32 integration) |
 | Git commits | 66 |
 
 ## Scripts
@@ -217,15 +217,17 @@ python -m thermaltrend.signals --strategy donchian --tickers AAPL MSFT --start 2
 python -m thermaltrend.signals --strategy rsi_mean_reversion --tickers AAPL MSFT --start 2024-01-01
 python -m thermaltrend.signals --strategy atr_trailing_stop --tickers AAPL MSFT --start 2024-01-01
 python -m thermaltrend.signals --strategy dual_momentum --tickers AAPL MSFT SPY --start 2024-01-01
+python -m thermaltrend.signals --strategy factor_scoring --tickers AAPL MSFT --start 2024-01-01
 ```
 
-Test files (27 files, 473 tests: 441 fast unit + 32 integration):
+Test files (28 files, 492 tests: 460 fast unit + 32 integration):
 - `tests/test_events.py` — EventQueue, MarketEvent, SignalEvent
-- `tests/test_strategy.py` — all 5 strategies incl. DualMomentumStrategy
+- `tests/test_strategy.py` — all 6 strategies incl. DualMomentumStrategy
 - `tests/test_engine.py` — DataEngine integration
 - `tests/test_feed.py` / `test_feed_integration.py` — DataFeed loading + real-data checks
 - `tests/test_pit_universe.py` — membership masking, `universe_exit` / Shumway `delisted` force-closes, PIT CLI runs
 - `tests/test_walk_forward.py` — grid expansion, param coercion, window scheduling, IS/OOS segmentation, best-combo selection, decay, PIT universe, sparse-metric N/A, CLI
+- `tests/test_factor_scoring.py` — factor math (momentum/trend/reversal/low-vol), z-score normalization, composite warmup/bounds, entry/exit hysteresis, absolute-momentum gate, metadata, registry wiring (backtest/compare/signals/walk-forward/dashboard)
 - `tests/test_membership_tools.py` — build_membership / download_removed / removed_coverage / survivorship_bias logic
 - `tests/test_download_removed_integration.py` — removed-member downloader (slow, Yahoo network, `--output` fixtures)
 - `tests/test_signals.py` — signals.py CLI + formatting
@@ -306,7 +308,7 @@ The planned system has 6 layers:
 
 1. **Data Layer** ← built (download, update, inspect scripts + `DataFeed` for event-driven consumption)
 2. **Event Queue** ← built (MarketEvent, SignalEvent, EventQueue + DataEngine + MACrossoverStrategy + signals CLI)
-3. **Strategy Engine** ← 5 of ~6 strategies built (MACrossoverStrategy, DonchianBreakoutStrategy, RSIMeanReversionStrategy, ATRTrailingStopStrategy, DualMomentumStrategy); factor scoring still planned
+3. **Strategy Engine** ← 6 strategies built (MACrossoverStrategy, DonchianBreakoutStrategy, RSIMeanReversionStrategy, ATRTrailingStopStrategy, DualMomentumStrategy, FactorScoringStrategy)
 4. **Analytics & Reporting** ← built (trade simulation, metrics, regime analysis, strategy ranking, benchmark comparison)
 5. **Signal Persistence** ← built (signal_store.py, backtest.py, compare_cli.py)
 6. **Portfolio & Risk** (position sizing, risk management)
