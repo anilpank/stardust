@@ -92,7 +92,7 @@ BENCHMARK_TICKER = "SPY"
 
 # Forced dark palette. Backgrounds and text colors are set explicitly so the
 # sidebar and metric cards stay readable even if Streamlit's theme detection
-# falls back to the light default.
+# falls back to the light default (which leaves widget surfaces white).
 CUSTOM_CSS = """
 <style>
 .stMetric > div { background: rgba(28,33,39,0.6); border-radius: 8px; padding: 12px; }
@@ -103,6 +103,20 @@ CUSTOM_CSS = """
 }
 [data-testid="stSidebarContent"] { color: #f0f0f0; }
 [data-testid="stSidebar"] * { color: #f0f0f0; }
+[data-testid="stSidebar"] [data-baseweb="select"],
+[data-testid="stSidebar"] [data-baseweb="base-input"],
+[data-testid="stSidebar"] [data-baseweb="input"] {
+    background-color: #1b1f27 !important;
+}
+[data-testid="stSidebar"] [data-baseweb="select"] > div {
+    background-color: transparent;
+}
+ul[data-baseweb="menu"] {
+    background-color: #1b1f27;
+}
+ul[data-baseweb="menu"] li {
+    color: #f0f0f0;
+}
 </style>
 """
 

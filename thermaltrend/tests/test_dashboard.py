@@ -401,3 +401,37 @@ class TestCustomCss:
     def test_dark_color_scheme_forced(self):
         from thermaltrend.dashboard import CUSTOM_CSS
         assert "color-scheme: dark" in CUSTOM_CSS
+
+    def test_widget_surfaces_forced_dark(self):
+        from thermaltrend.dashboard import CUSTOM_CSS
+        assert '[data-testid="stSidebar"] [data-baseweb="select"]' in CUSTOM_CSS
+        assert "background-color: #1b1f27 !important" in CUSTOM_CSS
+
+    def test_widget_contrast_meets_wcag_aa(self):
+        from thermaltrend.dashboard import CUSTOM_CSS
+        import re
+        fg = re.search(
+            r'\[data-testid="stSidebarContent"\][^{]*\{\s*color:\s*(#[0-9a-fA-F]{3,8})',
+            CUSTOM_CSS,
+        )
+        ratio = TestCustomCss._contrast_ratio("#1b1f27", fg.group(1))
+        assert ratio >= 4.5, f"widget contrast {ratio:.2f}:1 below WCAG AA (4.5:1)"
+
+
+class TestThemeConfig:
+    """The .streamlit/config.toml theme must declare base = "dark" so widget
+    surfaces (selectboxes, date inputs, etc.) render dark rather than white."""
+
+    def _config_path(self):
+        return Path(__file__).resolve().parent.parent.parent / ".streamlit" / "config.toml"
+
+    def test_theme_base_is_dark(self):
+        import re
+        assert self._config_path().exists(), "missing .streamlit/config.toml"
+        text = self._config_path().read_text()
+        assert re.search(r'^\s*base\s*=\s*"dark"', text, re.MULTILINE)
+
+    def test_dark_palette_configured(self):
+        text = self._config_path().read_text()
+        assert "backgroundColor = \"#0e1117\"" in text
+        assert "textColor = \"#e0e0e0\"" in text
