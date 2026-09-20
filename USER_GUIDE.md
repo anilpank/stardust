@@ -492,6 +492,10 @@ The sidebar adapts based on which tab you're on.
 
 **For standalone tabs** (Data Explorer, Compare Tickers): The sidebar shows a tip to use the controls on the main page. All configuration is on the main page itself.
 
+**For the Company Universe tab**: The sidebar shows a tip plus backtest controls for the drilldown — **Start**, **End**, and a **Universe** selector (current members vs. point-in-time S&P 500 membership). The main page holds the company list and all other controls.
+
+**For the Best Strategy tab**: Set the **Start/End** dates in the sidebar, then click **Run Full Analysis** on the main page.
+
 **Note on Dual Momentum:** When you pick the **Dual Mom 126d** strategy (or run a comparison that includes it), SPY is added to the data automatically as its benchmark. You never need to select SPY yourself — it isn't tradable by the strategy and won't appear in your results; it's only used for the return comparison.
 
 ### Tab: Overview
@@ -601,6 +605,24 @@ Compare multiple stocks side-by-side with normalized price charts — no backtes
 - Decide which stock to allocate more capital to
 - Spot correlations — do these stocks move together or diverge?
 
+### Tab: Company Universe
+
+Browse the whole S&P 500 ranked by market cap and drill into any company's strategy performance — no typing a ticker required.
+
+1. **The list** shows 100 companies per page by default (change via **Rows per page**), ranked by **market cap** (large → small) with the company name and last close alongside. Use **Prev / Next** or the page controls to move through all ~500 members.
+2. **Click any company** (its ticker button) to open its analysis page:
+   - **Recommended strategy** — a callout at the top tells you which of the 6 strategies I'd follow for that company and why, based on its backtest vig window (see sidebar **Start/End**). It weighs Sharpe ratio, win rate, CAGR, and drawdown across strategies with at least 3 completed trades; it's flagged "Exploratory pick" when few trades exist and "Least-bad" when every strategy lost money. Trust it less when those warnings appear.
+   - **Strategy Summary** — a table of all six strategies (total P&L, win rate, CAGR, Sharpe, max drawdown) plus a bar chart of total P&L by strategy.
+   - **Per-strategy drilldowns** — expand any strategy to see its completed trades (entry/exit dates, prices, P&L) and its equity curve.
+3. Click **‹ Back to company list** to return to browsing.
+
+Market caps are cached in `thermaltrend/data/equities/market_cap.csv` the first time you open the page; refresh them from the internet with `python -m thermaltrend.company_universe --refresh`.
+
+**Use cases:**
+- Find which strategies actually make money on a specific stock
+- Screen the whole index for companies where a particular strategy shines
+- Get a quick, per-company recommendation on how to trade it
+
 ### Daily Workflow with the Dashboard
 
 1. **Open the dashboard** (`streamlit run thermaltrend/dashboard.py`)
@@ -634,8 +656,9 @@ python thermaltrend/signals.py --strategy ma_crossover --tickers AAPL MSFT --min
 
 # === DASHBOARD ===
 streamlit run thermaltrend/dashboard.py                            # Open visual dashboard in browser
-# Tabs: Overview | Trades | Per-Ticker | Regime | Signals | Compare | Saved Runs | Data Explorer | Compare Tickers
+# Tabs: Overview | Trades | Per-Ticker | Regime | Signals | Compare | Saved Runs | Data Explorer | Compare Tickers | Best Strategy | Company Universe
 # Data Explorer & Compare Tickers work standalone — no backtest needed
+python -m thermaltrend.company_universe --refresh                # Refresh the market-cap cache behind Company Universe
 
 # === BACKTEST ===
 python thermaltrend/backtest.py --strategy ma_crossover --ticker AAPL --start 2024-01-01       # Basic backtest

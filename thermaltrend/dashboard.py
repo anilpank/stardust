@@ -34,6 +34,17 @@ from thermaltrend.charts import (
     strategy_heatmap,
 )
 from thermaltrend.compare_cli import run_compare
+from thermaltrend.company_universe import (
+    analyze_company,
+    company_summary_frame,
+    current_member_tickers,
+    format_market_cap,
+    load_market_caps,
+    market_cap_map,
+    recommend_strategy,
+    refresh_market_caps,
+    trades_to_frame,
+)
 from thermaltrend.core.engine import DataEngine
 from thermaltrend.core.strategy import (
     ATRTrailingStopStrategy,
@@ -45,7 +56,7 @@ from thermaltrend.core.strategy import (
 )
 from thermaltrend.feed import DataFeed
 from thermaltrend.signal_store import SignalStore
-from thermaltrend.ticker_search import format_ticker_label, parse_ticker_from_label
+from thermaltrend.ticker_search import company_name, format_ticker_label, parse_ticker_from_label
 
 DEFAULT_DATA_DIR = str(Path(__file__).parent / "data" / "equities")
 DEFAULT_REMOVED_DATA_DIR = str(Path(__file__).parent / "data" / "equities_removed")
@@ -723,6 +734,260 @@ def page_compare_tickers():
     st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
 
+CU_PAGE_SIZES = [25, 50, 100, 250, 500]
+
+
+def _color_pnl(val):
+    if pd.isna(val):
+        return ""
+    if val > 0:
+        return "color: #54A24B; font-weight: bold"
+    if val < 0:
+        return "color: #E45756; font-weight: bold"
+    return ""
+
+
+@st.cache_data(ttl=900, show_spinner=False)
+def _cached_company_analysis(ticker: str, start: str, end: str, universe: str) -> dict:
+    return analyze_company(ticker, start, end, universe=universe)
+
+
+def _read_last_close(ticker: str) -> float | None:
+    df = _load_ticker_data(ticker)
+    if df.empty:
+        return None
+    return float(df["Close"].iloc[-1])
+
+
+def _cu_offer_market_cap_fetch(tickers: list[str]):
+    st.warning("No market cap data is cached yet.")
+    st.markdown(
+        "Ordering companies by market cap requires a one-time fetch from Yahoo "
+        "Finance. The snapshot is saved to `data/equities/market_cap.csv` and reused "
+        "offline afterwards (use **Refresh Market Caps** to update it)."
+    )
+
+    if st.button("Fetch Market Caps Now", type="primary", use_container_width=True, key="cu_fetch"):
+        progress = st.progress(0, text="Fetching market caps from Yahoo Finance...")
+
+        def _on_progress(done: int, total: int):
+            progress.progress(done / total, text=f"Fetching market caps ({done}/{total})...")
+
+        with st.spinner("Fetching market caps from Yahoo Finance..."):
+            mc_table = refresh_market_caps(
+                tickers=tickers, progress_cb=_on_progress, keep_missing=True
+            )
+        if mc_table is None or mc_table.empty:
+            st.error("Could not fetch market caps. Check your internet connection and try again.")
+        else:
+            st.success(f"Cached market caps for {len(mc_table)} companies.")
+            st.rerun()
+
+
+def _render_strategy_recommendation(rec: dict, ticker: str, start, end):
+    """Callout at the top of the Strategy Summary recommending a strategy."""
+    if rec["low_confidence"]:
+        border = "#EECA3B"
+        tag = "Exploratory pick"
+    elif rec["total_pnl"] >= 0:
+        border = "#54A24B"
+        tag = "Recommended strategy"
+    else:
+        border = "#E45756"
+        tag = "Least-bad strategy"
+
+    lead = (
+        f"In this window I'd follow <strong>{rec['strategy']}</strong> for "
+        f"{ticker} over {start} → {end}, because it offers the best balance of "
+        f"return and risk: it is {rec['pnl_word']} "
+        f"(<strong>${rec['total_pnl']:,.0f} total P&L</strong>) across the strategies "
+        f"tested. Concretely —"
+    )
+    body = " ".join(rec["reasons"]) + "."
+
+    st.markdown(f"""
+    <div style="background: rgba(28,33,39,0.6); border-radius: 10px; padding: 16px 20px; margin-bottom: 14px; border-left: 4px solid {border}">
+        <div style="font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: {border}; font-weight: bold; margin-bottom: 6px;">{tag}</div>
+        <div style="font-size: 15px; color: #e0e0e0; line-height: 1.6;">
+            {lead} {body}
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+
+def _render_company_detail(ticker: str, start, end, universe: str):
+    if st.button("‹ Back to company list", key="cu_back"):
+        st.session_state["cu_selected"] = None
+        st.rerun()
+
+    caps = market_cap_map(load_market_caps())
+    st.subheader(f"{ticker} — {company_name(ticker)}")
+    st.caption(
+        f"Market cap {format_market_cap(caps.get(ticker))} · "
+        f"backtest {start} → {end} · every strategy run on this company"
+    )
+
+    with st.spinner(f"Running {len(STRATEGY_REGISTRY)} strategies on {ticker}..."):
+        results = _cached_company_analysis(ticker, str(start), str(end), universe)
+
+    summary = company_summary_frame(results)
+    if summary.empty:
+        st.info("No trades were generated for any strategy in this window.")
+        return
+
+    st.markdown("#### Strategy Summary")
+    rec = recommend_strategy(summary)
+    if rec is not None:
+        _render_strategy_recommendation(rec, ticker, start, end)
+    display = summary.copy()
+    display["win_rate"] = display["win_rate"].map(lambda x: f"{x * 100:.0f}%")
+    display["total_pnl"] = display["total_pnl"].map(lambda x: f"${x:,.0f}")
+    display["avg_trade_pnl"] = display["avg_trade_pnl"].map(lambda x: f"${x:,.0f}")
+    display["cagr"] = display["cagr"].map(lambda x: f"{x * 100:+.1f}%")
+    display["sharpe"] = display["sharpe"].map(lambda x: f"{x:.2f}")
+    display["max_drawdown"] = display["max_drawdown"].map(lambda x: f"{x * 100:.1f}%")
+    display.columns = [
+        "Strategy", "Total Trades", "Completed", "Win Rate", "Total P&L",
+        "Avg Trade P&L", "CAGR", "Sharpe", "Max Drawdown",
+    ]
+    st.dataframe(display, use_container_width=True, hide_index=True)
+
+    st.plotly_chart(
+        strategy_comparison_bar(summary, "total_pnl", title=f"Total P&L by Strategy — {ticker}"),
+        use_container_width=True,
+    )
+
+    for _, row in summary.iterrows():
+        label = row["strategy"]
+        result = results[label]
+        m = result["metrics"]
+        open_count = m.get("trades_open", 0)
+        title = (
+            f"{label} · ${row['total_pnl']:,.0f} total P&L · "
+            f"{int(row['trades_completed'])} completed trades"
+        )
+        if open_count:
+            title += f" · {open_count} open"
+        with st.expander(title, expanded=False):
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("CAGR", f"{m['cagr'] * 100:+.1f}%")
+            c2.metric("Sharpe", f"{m['sharpe']:.2f}")
+            c3.metric("Win Rate", f"{m['win_rate'] * 100:.0f}%")
+            c4.metric("Max Drawdown", f"{m['max_drawdown'] * 100:.1f}%", delta_color="inverse")
+
+            trades_df = trades_to_frame(result["trades"])
+            if trades_df.empty:
+                st.info(f"No completed trades for {label}.")
+            else:
+                st.dataframe(
+                    trades_df.style.map(_color_pnl, subset=["P&L ($)", "P&L (%)"]),
+                    use_container_width=True,
+                    hide_index=True,
+                )
+
+            st.plotly_chart(
+                equity_curve(result["equity_curve"], title=f"{label} — Equity Curve"),
+                use_container_width=True,
+            )
+
+
+def page_company_universe(start, end, universe: str = "current"):
+    selected = st.session_state.get("cu_selected")
+    if selected:
+        _render_company_detail(selected, start, end, universe)
+        return
+
+    st.subheader("Company Universe")
+    st.caption(
+        "S&P 500 companies ranked by market cap. Click a company to open its "
+        "analysis and see the individual trades and P&L of every strategy."
+    )
+
+    tickers = current_member_tickers()
+    if not tickers:
+        st.error("No S&P 500 price data found in the data directory.")
+        return
+
+    mc_table = load_market_caps()
+    if mc_table is None:
+        _cu_offer_market_cap_fetch(tickers)
+        return
+
+    caps = market_cap_map(mc_table)
+    fetched_at = mc_table["fetched_at"].iloc[0] if "fetched_at" in mc_table.columns else "—"
+
+    header_cols = st.columns([3, 2, 1])
+    with header_cols[0]:
+        st.write(f"**{len(tickers)} companies** · market caps as of {fetched_at}")
+    with header_cols[2]:
+        if st.button("Refresh Market Caps", use_container_width=True, key="cu_refresh"):
+            with st.spinner("Refreshing market caps from Yahoo Finance..."):
+                refreshed = refresh_market_caps(tickers=tickers, keep_missing=True)
+            if refreshed is not None and not refreshed.empty:
+                st.success(f"Updated market caps for {len(refreshed)} companies.")
+                st.rerun()
+            else:
+                st.error("Could not refresh market caps. Check your connection.")
+
+    with_cap = [t for t in tickers if t in caps]
+    without_cap = [t for t in tickers if t not in caps]
+    with_cap.sort(key=lambda t: caps[t], reverse=True)
+    ordered = with_cap + sorted(without_cap)
+
+    page_size = st.selectbox("Rows per page", CU_PAGE_SIZES, index=2, key="cu_rows")
+    total_pages = max((len(ordered) + page_size - 1) // page_size, 1)
+    page = min(max(st.session_state.get("cu_page", 1), 1), total_pages)
+    lo = (page - 1) * page_size
+    hi = min(lo + page_size, len(ordered))
+    page_tickers = ordered[lo:hi]
+
+    prev_col, mid_col, next_col = st.columns([1, 3, 1])
+    with prev_col:
+        prev_clicked = st.button("‹ Prev", disabled=(page <= 1), key="cu_prev", use_container_width=True)
+    with mid_col:
+        st.markdown(f"<div style='text-align:center'>Page **{page}** of **{total_pages}** (rows {lo + 1}–{hi} of {len(ordered)})</div>",
+                    unsafe_allow_html=True)
+    with next_col:
+        next_clicked = st.button("Next ›", disabled=(page >= total_pages), key="cu_next", use_container_width=True)
+
+    if prev_clicked:
+        st.session_state["cu_page"] = page - 1
+        st.rerun()
+    if next_clicked:
+        st.session_state["cu_page"] = page + 1
+        st.rerun()
+
+    close_cache = st.session_state.setdefault("cu_close_cache", {})
+    for t in page_tickers:
+        if t not in close_cache:
+            close_cache[t] = _read_last_close(t)
+
+    st.markdown(
+        "<div style='font-size:13px; color:#9aa4b0; margin-bottom:4px;'>"
+        "Ticker — Company &nbsp;&nbsp;&nbsp;&nbsp; Market Cap / Last Close — click a company to open its analysis"
+        "</div>",
+        unsafe_allow_html=True,
+    )
+
+    for idx, ticker in enumerate(page_tickers):
+        rank_col, pick_col, cap_col, close_col = st.columns([0.7, 5, 2, 1.3])
+        with rank_col:
+            st.write(f"**{lo + idx + 1}**")
+        with pick_col:
+            if st.button(
+                f"{ticker} — {company_name(ticker)}",
+                key=f"cu_row_{ticker}",
+                use_container_width=True,
+            ):
+                st.session_state["cu_selected"] = ticker
+                st.rerun()
+        with cap_col:
+            st.write(f"**{format_market_cap(caps.get(ticker))}**")
+        with close_col:
+            close = close_cache.get(ticker)
+            st.write("-" if close is None else f"${close:,.2f}")
+
+
 def page_best_strategy(start: str, end: str):
     st.subheader("Best Strategy per Ticker (S&P 500)")
     st.caption("Runs all registered strategies on every S&P 500 constituent and shows which worked best for each ticker, compared against S&P 500 buy-and-hold returns.")
@@ -913,7 +1178,7 @@ def main():
         tab_choice = st.radio(
             "Navigation",
             ["Overview", "Trades", "Per-Ticker", "Regime", "Signals", "Compare", "Saved Runs",
-             "Data Explorer", "Compare Tickers", "Best Strategy"],
+             "Data Explorer", "Compare Tickers", "Best Strategy", "Company Universe"],
             label_visibility="collapsed",
         )
 
@@ -928,6 +1193,26 @@ def main():
                 start = st.date_input("Start", value=pd.Timestamp("2023-01-01").date(), key="best_start")
             with col2:
                 end = st.date_input("End", value=pd.Timestamp("2026-07-01").date(), key="best_end")
+        elif tab_choice == "Company Universe":
+            st.info("Pick the backtest window used for each company's strategy drilldown.")
+            col1, col2 = st.columns(2)
+            with col1:
+                start = st.date_input("Start", value=pd.Timestamp("2023-01-01").date(), key="cu_start")
+            with col2:
+                end = st.date_input("End", value=pd.Timestamp("2026-07-01").date(), key="cu_end")
+            universe = st.selectbox(
+                "Universe",
+                UNIVERSE_CHOICES,
+                index=0,
+                format_func=lambda u: {
+                    "current": "Current members",
+                    "point_in_time": "Point-in-time (S&P 500 membership)",
+                }[u],
+                key="cu_universe",
+                help="Point-in-time restricts each company to the dates it was "
+                     "actually an S&P 500 member, using membership.csv.",
+            )
+            st.session_state["universe"] = universe
         else:
             strategy_name = st.selectbox("Strategy", list(STRATEGY_REGISTRY.keys()), index=0)
             st.caption(STRATEGY_DESCRIPTIONS[strategy_name])
@@ -1000,7 +1285,7 @@ def main():
                         "Require positive momentum to buy", True
                     )
 
-            run_backtest = tab_choice not in ("Compare", "Saved Runs", "Best Strategy")
+            run_backtest = tab_choice not in ("Compare", "Saved Runs", "Best Strategy", "Company Universe")
 
             if run_backtest and st.button("Run Analysis", type="primary", use_container_width=True):
                 if not tickers:
@@ -1055,6 +1340,8 @@ def main():
         page_compare_tickers()
     elif tab_choice == "Best Strategy":
         page_best_strategy(str(start), str(end))
+    elif tab_choice == "Company Universe":
+        page_company_universe(start, end, universe)
     else:
         result = st.session_state.get("result")
         if result is None:
