@@ -22,6 +22,7 @@ Working pipeline: **DataFeed → DataEngine → Strategy → SignalEvents → Tr
 | Signal Persistence (`signal_store.py`) | Built |
 | Per-Period Breakdown (monthly/quarterly/yearly) | Built |
 | Streamlit Dashboard (`dashboard.py` + `charts.py`) | Built (Dual Momentum supported — benchmark auto-injected via `resolve_feed_tickers()`); Universe selector in sidebar |
+| Company Universe (`company_universe.py`) | Built (market-cap ranked S&P 500 list, paginated & clickable; per-company drilldown runs all 6 strategies; strategy recommendation blurb) |
 | Point-in-Time Universe (`--universe point_in_time` + `membership.csv`) | Built (restricts trades to actual S&P 500 membership windows) |
 | Removed-Member Data (`data/equities_removed/` + `download_removed.py`) | Built (258 removed members backfilled; 445 genuinely delisted) |
 | Survivorship-Bias Tooling (`survivorship_bias.py`, `removed_coverage.py`) | Built (bias ~2.6–4.3%/yr survivors-only; ±<1%/yr residual with PIT) |
@@ -29,7 +30,7 @@ Working pipeline: **DataFeed → DataEngine → Strategy → SignalEvents → Tr
 | Portfolio & Risk | Not built |
 | Execution Handler | Not built |
 
-Source: ~6,850 lines across 24 modules. Tests: ~6,950 lines across 28 files (492 tests; 460 fast unit + 32 integration).
+Source: ~8,050 lines across 29 modules. Tests: ~7,650 lines across 30 files (585 tests; 553 fast unit + 32 integration).
 
 ---
 
@@ -166,6 +167,11 @@ Phase 3e (done)     →  Simple Factor Scoring (factor_scoring) — the last str
                        entry on 0.60 cross-up (+ optional absolute-momentum gate), exit on 0.50
                        cross-down or momentum failure; wired into backtest/compare/signals,
                        the dashboard (Factor 126d), and walk-forward (_max_lookback 378)
+Phase 3f (done)     →  Company Universe (company_universe.py): market-cap ranked S&P 500 page
+                       in the dashboard — paginated list (default 100/company, click any ticker),
+                       per-company drilldown running all 6 strategies with per-strategy trades and
+                       P&L, and a strategy recommendation (Sharpe/win-rate/CAGR/drawdown composite
+                       over strategies with ≥ 3 completed trades) + market cap cache (market_cap.csv)
 Phase 4 (next)      →  portfolio/ package (position sizing, PnL)
 Phase 5 (later)     →  execution/ (OrderEvent, FillEvent, simulated fills)
 Phase 6 (future)    →  live broker bridge

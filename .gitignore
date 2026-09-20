@@ -220,6 +220,7 @@ __marimo__/
 # Thermaltrend generated data caches (re-downloadable)
 thermaltrend/data/benchmarks/
 thermaltrend/data/membership/
+thermaltrend/data/equities/market_cap.csv
 
 # macOS
 .DS_Store

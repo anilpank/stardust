@@ -48,10 +48,12 @@ thermaltrend/
 ├── signals.py                     # Generate trading signals (with --save)
 ├── walk_forward.py                # Walk-forward (rolling out-of-sample) validation
 ├── ticker_search.py               # Company-name → ticker lookup for the dashboard
+├── company_universe.py            # Market-cap ranked S&P 500 universe + per-company strategy drilldown
+│                                  #   (market cap cache, analyze_company, recommend_strategy, CLI)
 ├── dashboard.py                   # Streamlit dashboard: backtests, signals, comparisons,
-│                                  #   Data Explorer, Compare Tickers
+│                                  #   Data Explorer, Compare Tickers, Company Universe
 ├── charts.py                      # Plotly chart builders used by the dashboard
-└── tests/                         # 557 tests across 29 files (525 fast unit + 32 integration)
+└── tests/                         # 585 tests across 30 files (553 fast unit + 32 integration)
 ```
 
 ## Running Scripts
@@ -448,7 +450,9 @@ A Streamlit dashboard wraps the full workflow in a point-and-click interface:
 streamlit run thermaltrend/dashboard.py
 ```
 
-Tabs: Overview (metric cards, equity curve, drawdown, P&L distribution, price & signals), Trades, Per-Ticker, Regime, Signals, Compare, Saved Runs, plus standalone Data Explorer and Compare Tickers pages. Dual Momentum is fully supported — SPY is auto-added as its benchmark. A **Universe** selector in the sidebar switches between current-member and point-in-time universes. All ticker pickers accept **company names** in addition to ticker symbols — type "Apple" or "Bank of America" and the list narrows to the matching stocks (`ticker_search.py` resolves names offline from `membership.csv`). See `USER_GUIDE.md` Section 10 for a walkthrough.
+Tabs: Overview (metric cards, equity curve, drawdown, P&L distribution, price & signals), Trades, Per-Ticker, Regime, Signals, Compare, Saved Runs, plus standalone Data Explorer, Compare Tickers, and Company Universe pages. Dual Momentum is fully supported — SPY is auto-added as its benchmark. A **Universe** selector in the sidebar switches between current-member and point-in-time universes. All ticker pickers accept **company names** in addition to ticker symbols — type "Apple" or "Bank of America" and the list narrows to the matching stocks (`ticker_search.py` resolves names offline from `membership.csv`). See `USER_GUIDE.md` Section 10 for a walkthrough.
+
+**Company Universe** ranks the S&P 500 by market cap (cached in `data/equities/market_cap.csv`, refreshed via `python -m thermaltrend.company_universe --refresh`) and provides a per-company drilldown: click any company to run all six strategies on it and see the individual trades and P&L of each, plus a data-driven recommendation of which strategy to follow (`recommend_strategy`).
 
 ## Running Tests
 
