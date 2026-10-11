@@ -1,0 +1,420 @@
+{
+  "generated_at": "2026-10-11T10:10:47+00:00",
+  "oos_definition": "winner re-scored on the most recent 30% of each window (holdout); flagged overfit if the holdout return is negative or win rate < 50%",
+  "windows": [
+    "1y",
+    "3y",
+    "5y",
+    "10y"
+  ],
+  "tickers": {
+    "AAPL": {
+      "name": "Apple Inc.",
+      "signal": {
+        "direction": "BUY",
+        "strength": 0.199,
+        "as_of": "2026-08-14",
+        "strategy": "Dual Mom 126d"
+      },
+      "windows": {
+        "1y": {
+          "strategy": "Dual Mom 126d",
+          "low_confidence": false,
+          "oos": null,
+          "win_rate": 0.6667,
+          "total_pnl": 754.73,
+          "cagr": 0.0119,
+          "sharpe": -3.876,
+          "trades_completed": 12
+        },
+        "3y": {
+          "strategy": "Donchian 20/10",
+          "low_confidence": false,
+          "oos": false,
+          "win_rate": 0.7,
+          "total_pnl": 4451.02,
+          "cagr": 0.0145,
+          "sharpe": -1.604,
+          "trades_completed": 10
+        },
+        "5y": {
+          "strategy": "MA 50/200",
+          "low_confidence": false,
+          "oos": null,
+          "win_rate": 0.5,
+          "total_pnl": 4062.93,
+          "cagr": 0.0112,
+          "sharpe": -1.355,
+          "trades_completed": 4
+        },
+        "10y": {
+          "strategy": "ATR Trail 20/14/3",
+          "low_confidence": false,
+          "oos": true,
+          "win_rate": 0.6,
+          "total_pnl": 20499.09,
+          "cagr": 0.0161,
+          "sharpe": -1.153,
+          "trades_completed": 40
+        }
+      }
+    },
+    "NVDA": {
+      "name": "Nvidia",
+      "signal": {
+        "direction": "BUY",
+        "strength": 0.5,
+        "as_of": "2026-08-05",
+        "strategy": "ATR Trail 20/14/3"
+      },
+      "windows": {
+        "1y": {
+          "strategy": "ATR Trail 20/14/3",
+          "low_confidence": false,
+          "oos": null,
+          "win_rate": 0.2,
+          "total_pnl": -1369.54,
+          "cagr": -0.0101,
+          "sharpe": -6.09,
+          "trades_completed": 5
+        },
+        "3y": {
+          "strategy": "ATR Trail 20/14/3",
+          "low_confidence": false,
+          "oos": false,
+          "win_rate": 0.4615,
+          "total_pnl": 11102.59,
+          "cagr": 0.0379,
+          "sharpe": -0.049,
+          "trades_completed": 13
+        },
+        "5y": {
+          "strategy": "ATR Trail 20/14/3",
+          "low_confidence": false,
+          "oos": false,
+          "win_rate": 0.4737,
+          "total_pnl": 28036.92,
+          "cagr": 0.0426,
+          "sharpe": 0.058,
+          "trades_completed": 19
+        },
+        "10y": {
+          "strategy": "MA 50/200",
+          "low_confidence": false,
+          "oos": null,
+          "win_rate": 0.6667,
+          "total_pnl": 93436.3,
+          "cagr": 0.0526,
+          "sharpe": 0.136,
+          "trades_completed": 3
+        }
+      }
+    },
+    "MSFT": {
+      "name": "Microsoft",
+      "signal": {
+        "direction": "BUY",
+        "strength": 0.054,
+        "as_of": "2026-07-16",
+        "strategy": "Donchian 20/10"
+      },
+      "windows": {
+        "1y": {
+          "strategy": "Donchian 20/10",
+          "low_confidence": false,
+          "oos": null,
+          "win_rate": 0.0,
+          "total_pnl": -849.74,
+          "cagr": -0.0063,
+          "sharpe": -10.326,
+          "trades_completed": 3
+        },
+        "3y": {
+          "strategy": "Dual Mom 126d",
+          "low_confidence": false,
+          "oos": null,
+          "win_rate": 0.75,
+          "total_pnl": 2245.05,
+          "cagr": 0.0089,
+          "sharpe": -2.426,
+          "trades_completed": 4
+        },
+        "5y": {
+          "strategy": "Dual Mom 126d",
+          "low_confidence": false,
+          "oos": true,
+          "win_rate": 0.6667,
+          "total_pnl": 6276.43,
+          "cagr": 0.0133,
+          "sharpe": -1.308,
+          "trades_completed": 9
+        },
+        "10y": {
+          "strategy": "Dual Mom 126d",
+          "low_confidence": false,
+          "oos": true,
+          "win_rate": 0.549,
+          "total_pnl": 18883.76,
+          "cagr": 0.0172,
+          "sharpe": -0.913,
+          "trades_completed": 51
+        }
+      }
+    },
+    "KO": {
+      "name": "Coca-Cola Company (The)",
+      "signal": {
+        "direction": "BUY",
+        "strength": 0.023,
+        "as_of": "2026-09-16",
+        "strategy": "Dual Mom 126d"
+      },
+      "windows": {
+        "1y": {
+          "strategy": "Dual Mom 126d",
+          "low_confidence": false,
+          "oos": null,
+          "win_rate": 0.8333,
+          "total_pnl": 1888.33,
+          "cagr": 0.02,
+          "sharpe": -1.356,
+          "trades_completed": 6
+        },
+        "3y": {
+          "strategy": "Donchian 20/10",
+          "low_confidence": false,
+          "oos": false,
+          "win_rate": 0.6,
+          "total_pnl": 1729.3,
+          "cagr": 0.0058,
+          "sharpe": -3.762,
+          "trades_completed": 10
+        },
+        "5y": {
+          "strategy": "Donchian 20/10",
+          "low_confidence": false,
+          "oos": false,
+          "win_rate": 0.5882,
+          "total_pnl": 2246.88,
+          "cagr": 0.0048,
+          "sharpe": -4.623,
+          "trades_completed": 17
+        },
+        "10y": {
+          "strategy": "Donchian 20/10",
+          "low_confidence": false,
+          "oos": true,
+          "win_rate": 0.4872,
+          "total_pnl": 4902.92,
+          "cagr": 0.005,
+          "sharpe": -4.446,
+          "trades_completed": 39
+        }
+      }
+    },
+    "JPM": {
+      "name": "JPMorgan Chase",
+      "signal": {
+        "direction": "SELL",
+        "strength": 0.05,
+        "as_of": "2026-08-20",
+        "strategy": "Donchian 20/10"
+      },
+      "windows": {
+        "1y": {
+          "strategy": "Donchian 20/10",
+          "low_confidence": false,
+          "oos": null,
+          "win_rate": 0.5,
+          "total_pnl": 311.12,
+          "cagr": 0.0069,
+          "sharpe": -2.766,
+          "trades_completed": 4
+        },
+        "3y": {
+          "strategy": "Donchian 20/10",
+          "low_confidence": false,
+          "oos": true,
+          "win_rate": 0.5,
+          "total_pnl": 5553.97,
+          "cagr": 0.0106,
+          "sharpe": -1.977,
+          "trades_completed": 12
+        },
+        "5y": {
+          "strategy": "Factor 126d",
+          "low_confidence": false,
+          "oos": null,
+          "win_rate": 0.5,
+          "total_pnl": 3707.82,
+          "cagr": 0.0075,
+          "sharpe": -2.104,
+          "trades_completed": 6
+        },
+        "10y": {
+          "strategy": "MA 50/200",
+          "low_confidence": false,
+          "oos": null,
+          "win_rate": 0.5,
+          "total_pnl": 4708.36,
+          "cagr": 0.0066,
+          "sharpe": -2.252,
+          "trades_completed": 4
+        }
+      }
+    },
+    "XOM": {
+      "name": "ExxonMobil",
+      "signal": {
+        "direction": "BUY",
+        "strength": 0.033,
+        "as_of": "2026-07-17",
+        "strategy": "Donchian 20/10"
+      },
+      "windows": {
+        "1y": {
+          "strategy": "Donchian 20/10",
+          "low_confidence": false,
+          "oos": null,
+          "win_rate": 0.3333,
+          "total_pnl": 2331.38,
+          "cagr": 0.0281,
+          "sharpe": -0.357,
+          "trades_completed": 3
+        },
+        "3y": {
+          "strategy": "Factor 126d",
+          "low_confidence": false,
+          "oos": null,
+          "win_rate": 0.25,
+          "total_pnl": 2880.04,
+          "cagr": 0.0387,
+          "sharpe": -0.029,
+          "trades_completed": 4
+        },
+        "5y": {
+          "strategy": "MA 50/200",
+          "low_confidence": false,
+          "oos": null,
+          "win_rate": 0.3333,
+          "total_pnl": 4290.11,
+          "cagr": 0.0154,
+          "sharpe": -0.876,
+          "trades_completed": 3
+        },
+        "10y": {
+          "strategy": "Dual Mom 126d",
+          "low_confidence": false,
+          "oos": false,
+          "win_rate": 0.4286,
+          "total_pnl": 10302.95,
+          "cagr": 0.0118,
+          "sharpe": -0.971,
+          "trades_completed": 35
+        }
+      }
+    },
+    "WMT": {
+      "name": "Walmart",
+      "signal": {
+        "direction": "SELL",
+        "strength": 0.399,
+        "as_of": "2026-05-21",
+        "strategy": "Donchian 20/10"
+      },
+      "windows": {
+        "1y": {
+          "strategy": "Donchian 20/10",
+          "low_confidence": false,
+          "oos": null,
+          "win_rate": 0.6667,
+          "total_pnl": 409.47,
+          "cagr": 0.0049,
+          "sharpe": -5.201,
+          "trades_completed": 3
+        },
+        "3y": {
+          "strategy": "Donchian 20/10",
+          "low_confidence": false,
+          "oos": true,
+          "win_rate": 0.5455,
+          "total_pnl": 3391.48,
+          "cagr": 0.0136,
+          "sharpe": -1.554,
+          "trades_completed": 11
+        },
+        "5y": {
+          "strategy": "Factor 126d",
+          "low_confidence": false,
+          "oos": null,
+          "win_rate": 0.4,
+          "total_pnl": 3734.26,
+          "cagr": 0.0138,
+          "sharpe": -0.935,
+          "trades_completed": 5
+        },
+        "10y": {
+          "strategy": "Factor 126d",
+          "low_confidence": false,
+          "oos": false,
+          "win_rate": 0.3846,
+          "total_pnl": 4327.09,
+          "cagr": 0.0056,
+          "sharpe": -2.185,
+          "trades_completed": 13
+        }
+      }
+    },
+    "TSLA": {
+      "name": "Tesla, Inc.",
+      "signal": {
+        "direction": "BUY",
+        "strength": 0.5,
+        "as_of": "2026-08-31",
+        "strategy": "ATR Trail 20/14/3"
+      },
+      "windows": {
+        "1y": {
+          "strategy": "ATR Trail 20/14/3",
+          "low_confidence": false,
+          "oos": null,
+          "win_rate": 0.0,
+          "total_pnl": -1588.9,
+          "cagr": -0.01,
+          "sharpe": -6.753,
+          "trades_completed": 3
+        },
+        "3y": {
+          "strategy": "Dual Mom 126d",
+          "low_confidence": false,
+          "oos": null,
+          "win_rate": 0.3077,
+          "total_pnl": -815.55,
+          "cagr": 0.0025,
+          "sharpe": -1.002,
+          "trades_completed": 13
+        },
+        "5y": {
+          "strategy": "RSI 14",
+          "low_confidence": false,
+          "oos": null,
+          "win_rate": 0.2,
+          "total_pnl": 1476.28,
+          "cagr": 0.0102,
+          "sharpe": -0.848,
+          "trades_completed": 5
+        },
+        "10y": {
+          "strategy": "MA 50/200",
+          "low_confidence": false,
+          "oos": false,
+          "win_rate": 0.125,
+          "total_pnl": 89320.6,
+          "cagr": 0.0893,
+          "sharpe": 0.24,
+          "trades_completed": 8
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="robots" content="noindex, nofollow" />
+  <title>stardust · experiment console</title>
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="admin.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="wrap wide">
+      <span class="brand">✦ stardust <span class="muted">· experiment console</span></span>
+      <span class="topbar-actions">
+        <span id="updated" class="muted small">—</span>
+        <button type="button" id="refresh" class="chip">Refresh</button>
+        <a class="chip" id="btn-signups" href="#">Export leads</a>
+        <a class="chip" id="btn-events" href="#">Export events</a>
+        <button type="button" id="logout" class="chip">Lock</button>
+      </span>
+    </div>
+  </header>
+
+  <main class="wrap wide">
+    <section id="auth" class="auth hidden">
+      <h2>Enter PIN</h2>
+      <p class="muted">The admin console is PIN-protected. Enter the PIN to view experiment data.</p>
+      <form id="pin-form" class="field-row">
+        <input id="pin-input" type="password" inputmode="numeric" autocomplete="off"
+               placeholder="PIN" maxlength="12" aria-label="Admin PIN" />
+        <button type="submit" class="btn btn-primary">Unlock</button>
+      </form>
+      <p id="pin-msg" class="microcopy" role="status" aria-live="polite"></p>
+    </section>
+
+    <div id="dashboard">
+      <section class="kpis" id="kpis"></section>
+
+      <section class="panel">
+        <div class="panel-head"><h2>Conversion funnel</h2></div>
+        <div id="funnel" class="funnel"></div>
+      </section>
+
+      <div class="two-col">
+        <section class="panel">
+          <div class="panel-head"><h2>Traffic sources</h2></div>
+          <table class="data">
+            <thead><tr><th>Source</th><th class="num">Events</th><th class="num">Leads</th></tr></thead>
+            <tbody id="sources"></tbody>
+          </table>
+        </section>
+        <section class="panel">
+          <div class="panel-head"><h2>Top tickers requested</h2></div>
+          <table class="data">
+            <thead><tr><th>Ticker</th><th class="num">Leads</th></tr></thead>
+            <tbody id="tickers"></tbody>
+          </table>
+        </section>
+      </div>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Leads <span id="lead-count" class="muted"></span></h2>
+        </div>
+        <div class="table-scroll">
+          <table class="data">
+            <thead>
+              <tr><th>When</th><th>Email</th><th>Ticker</th><th>Source</th><th>Returning</th><th>IP</th></tr>
+            </thead>
+            <tbody id="leads"></tbody>
+          </table>
+        </div>
+        <p id="leads-empty" class="muted hidden">No leads yet.</p>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Events <span id="event-count" class="muted"></span></h2>
+          <div class="filters">
+            <input id="event-search" type="text" placeholder="Filter ticker / source / visitor…" />
+            <select id="event-type">
+              <option value="">All events</option>
+              <option>visit</option><option>return_visit</option>
+              <option>ticker_lookup</option><option>signal_view</option>
+              <option>cta_click</option><option>email_submit</option>
+              <option>wtp_yes</option><option>wtp_maybe</option><option>wtp_no</option>
+            </select>
+          </div>
+        </div>
+        <div class="table-scroll tall">
+          <table class="data">
+            <thead>
+              <tr><th>When</th><th>Event</th><th>Ticker</th><th>Source</th><th>Visitor</th><th>Returning</th></tr>
+            </thead>
+            <tbody id="events"></tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <script src="admin.js"></script>
+</body>
+</html>

@@ -1,0 +1,98 @@
+/* Admin console — layered on top of styles.css tokens. */
+
+.wrap.wide { max-width: 1240px; }
+
+body { padding-bottom: 60px; }
+
+.hidden { display: none !important; }
+
+.small { font-size: 0.82rem; }
+
+.topbar-actions { display: flex; align-items: center; gap: 10px; }
+.topbar .chip { text-decoration: none; }
+
+main { padding-top: 26px; }
+
+/* ---------- KPI cards ---------- */
+.kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px;
+  margin-bottom: 22px;
+}
+.kpi {
+  background: var(--panel); border: 1px solid var(--border);
+  border-radius: 12px; padding: 16px;
+}
+.kpi .k-label { color: var(--muted); font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.07em; }
+.kpi .k-value { font-size: 1.7rem; font-weight: 700; margin-top: 6px; }
+.kpi .k-sub { color: var(--muted); font-size: 0.8rem; margin-top: 2px; }
+.kpi.accent { border-color: rgba(52, 211, 153, 0.45); background: rgba(52, 211, 153, 0.06); }
+.kpi.accent .k-value { color: var(--accent); }
+
+/* ---------- panels ---------- */
+.panel {
+  background: var(--panel); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 18px; margin-bottom: 18px;
+}
+.panel-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; flex-wrap: wrap; margin-bottom: 12px;
+}
+.panel-head h2 { font-size: 1.1rem; margin: 0; }
+
+.two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+
+/* ---------- funnel ---------- */
+.funnel { display: flex; flex-direction: column; gap: 10px; }
+.funnel-row { display: grid; grid-template-columns: 150px 1fr 64px; align-items: center; gap: 12px; }
+.funnel-row .f-step { color: var(--muted); font-size: 0.9rem; }
+.funnel-bar { background: var(--panel-2); border-radius: 6px; height: 22px; overflow: hidden; }
+.funnel-bar > span {
+  display: block; height: 100%;
+  background: linear-gradient(90deg, var(--accent), var(--accent-2));
+}
+.funnel-row .f-val { text-align: right; font-weight: 700; font-variant-numeric: tabular-nums; }
+
+/* ---------- tables ---------- */
+.table-scroll { overflow-x: auto; }
+.table-scroll.tall { max-height: 520px; overflow-y: auto; }
+table.data { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+table.data th, table.data td {
+  text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+table.data th {
+  color: var(--muted); font-weight: 600; font-size: 0.76rem;
+  text-transform: uppercase; letter-spacing: 0.06em;
+  position: sticky; top: 0; background: var(--panel); z-index: 1;
+}
+table.data td.num, table.data th.num { text-align: right; font-variant-numeric: tabular-nums; }
+table.data tbody tr:hover { background: rgba(255, 255, 255, 0.03); }
+table.data td.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.85rem; }
+
+.pill {
+  display: inline-block; padding: 2px 9px; border-radius: 999px;
+  font-size: 0.78rem; font-weight: 600; background: var(--panel-2); border: 1px solid var(--border);
+}
+.pill.email_submit, .pill.wtp_yes { background: rgba(52, 211, 153, 0.15); color: var(--accent); border-color: rgba(52, 211, 153, 0.4); }
+.pill.return_visit { background: rgba(34, 211, 238, 0.13); color: var(--accent-2); border-color: rgba(34, 211, 238, 0.4); }
+.pill.wtp_no { color: var(--muted); }
+.pill.wtp_maybe { color: var(--warn); }
+
+.filters { display: flex; gap: 8px; flex-wrap: wrap; }
+.filters input, .filters select {
+  background: var(--panel-2); color: var(--text); border: 1px solid var(--border);
+  border-radius: 8px; padding: 8px 11px; font-family: inherit; font-size: 0.88rem;
+}
+.filters input { min-width: 240px; }
+
+/* ---------- auth ---------- */
+.auth { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 22px; margin-bottom: 18px; }
+.auth h2 { margin-top: 0; }
+code { background: var(--panel-2); padding: 1px 6px; border-radius: 5px; font-size: 0.85rem; }
+
+@media (max-width: 760px) {
+  .two-col { grid-template-columns: 1fr; }
+  .funnel-row { grid-template-columns: 110px 1fr 44px; }
+}

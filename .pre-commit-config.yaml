@@ -8,3 +8,9 @@ repos:
         types: [python]
         pass_filenames: false
         always_run: true
+      - id: landing-tests
+        name: Run landing-page tests
+        entry: python -m pytest landing/tests/ -q
+        language: system
+        files: ^landing/
+        pass_filenames: false

@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Which strategy wins on your stock? — stardust</title>
+  <meta name="description" content="Enter any S&P 500 ticker to see which trading strategy actually fit it over the last 1, 3, 5 and 10 years — with an honest out-of-sample check — then get its current buy/sell signal." />
+  <meta property="og:title" content="Stop guessing which strategy works on your stocks." />
+  <meta property="og:description" content="See which strategy actually fit each S&P 500 stock over 1/3/5/10 years, with an out-of-sample honesty check and a current buy/sell signal." />
+  <meta property="og:type" content="website" />
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ctext y='26' font-size='26'%3E%E2%9C%A6%3C/text%3E%3C/svg%3E" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="wrap">
+      <span class="brand">✦ stardust</span>
+      <span class="tag">Research prototype</span>
+    </div>
+  </header>
+
+  <!-- ================= SECTION 1 — HERO ================= -->
+  <section class="hero" id="top">
+    <div class="wrap">
+      <p class="eyebrow">For S&amp;P 500 investors</p>
+      <h1>Stop guessing which strategy works on your stocks.</h1>
+      <p class="sub">
+        Enter any S&amp;P 500 ticker to see <strong>which strategy actually fit it</strong>
+        over the last 1, 3, 5 and 10 years — with an honest out-of-sample check —
+        then get its current buy/sell signal by email.
+      </p>
+
+      <form class="lead-form" id="hero-form" novalidate>
+        <div class="field-row">
+          <label class="visually-hidden" for="hero-ticker">Ticker</label>
+          <input id="hero-ticker" name="ticker" type="text" inputmode="text"
+                 autocomplete="off" placeholder="Ticker (e.g. AAPL)" maxlength="6" />
+          <label class="visually-hidden" for="hero-email">Email</label>
+          <input id="hero-email" name="email" type="email" inputmode="email"
+                 autocomplete="email" placeholder="you@email.com" />
+          <button type="submit" class="btn btn-primary" data-cta="hero">Get my signal →</button>
+        </div>
+        <p class="microcopy" id="hero-msg" role="status" aria-live="polite">
+          No account. One email. Unsubscribe anytime. Early prototype — research, not investment advice.
+        </p>
+      </form>
+
+      <div class="quickpicks">
+        <span>Try a famous one:</span>
+        <button type="button" class="chip" data-ticker="AAPL">AAPL</button>
+        <button type="button" class="chip" data-ticker="NVDA">NVDA</button>
+        <button type="button" class="chip" data-ticker="MSFT">MSFT</button>
+        <button type="button" class="chip" data-ticker="KO">KO</button>
+        <button type="button" class="chip" data-ticker="JPM">JPM</button>
+        <button type="button" class="chip" data-ticker="TSLA">TSLA</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= SECTION 2 — THE PROBLEM ================= -->
+  <section class="section" id="problem">
+    <div class="wrap">
+      <h2>Your backtest looked incredible. Then it met the market.</h2>
+      <p class="section-lead">If any of these sound familiar, this page is for you.</p>
+      <div class="cards">
+        <article class="card">
+          <h3>“It worked in the backtest…”</h3>
+          <p>…and bled the moment real money hit it. You tuned it until the equity
+             curve looked perfect — which is exactly how you curve-fit it.</p>
+        </article>
+        <article class="card">
+          <h3>“Every stock behaves differently.”</h3>
+          <p>Trending stocks love breakouts. Range-bound ones reward mean reversion.
+             You can’t hand-test 500 names to find out which is which.</p>
+        </article>
+        <article class="card">
+          <h3>“Signals with no honesty.”</h3>
+          <p>Most services blast the same call to everyone and never tell you whether
+             the edge is real or just survivorship bias and luck.</p>
+        </article>
+      </div>
+      <p class="cost-note">
+        A single overfit strategy can quietly erase months of gains —
+        and most tools never tell you it was curve-fit.
+      </p>
+    </div>
+  </section>
+
+  <!-- ================= SECTION 3 — HOW IT WORKS ================= -->
+  <section class="section section-alt" id="how">
+    <div class="wrap">
+      <h2>How it works</h2>
+      <ol class="steps">
+        <li><span class="step-n">1</span><div><h3>Enter a ticker</h3>
+          <p>Any S&amp;P 500 symbol, or pick a famous one below.</p></div></li>
+        <li><span class="step-n">2</span><div><h3>See which strategy fit best</h3>
+          <p>A six-strategy comparison across 1, 3, 5 and 10 years, each tagged
+             <em>held up out-of-sample</em> or <em>likely overfit</em>.</p></div></li>
+        <li><span class="step-n">3</span><div><h3>Get the current signal</h3>
+          <p>The winning strategy’s live buy/sell call, delivered to your inbox.</p></div></li>
+      </ol>
+
+      <!-- interactive prototype -->
+      <div class="demo" id="demo">
+        <div class="demo-head">
+          <h3>Live prototype</h3>
+          <span class="badge-stage">Illustrative data — prototype, not live advice</span>
+        </div>
+        <form class="demo-form" id="demo-form">
+          <label class="visually-hidden" for="demo-ticker">Ticker</label>
+          <input id="demo-ticker" type="text" placeholder="Enter a ticker" maxlength="6" autocomplete="off" />
+          <button type="submit" class="btn btn-ghost">Check strategy →</button>
+        </form>
+        <div class="quickpicks quickpicks-inline">
+          <span>Quick picks:</span>
+          <button type="button" class="chip" data-ticker="AAPL">AAPL</button>
+          <button type="button" class="chip" data-ticker="NVDA">NVDA</button>
+          <button type="button" class="chip" data-ticker="MSFT">MSFT</button>
+          <button type="button" class="chip" data-ticker="KO">KO</button>
+          <button type="button" class="chip" data-ticker="JPM">JPM</button>
+          <button type="button" class="chip" data-ticker="XOM">XOM</button>
+          <button type="button" class="chip" data-ticker="WMT">WMT</button>
+        </div>
+        <div class="demo-result" id="demo-result">
+          <p class="muted">Enter a ticker or tap a quick pick to see the strategy fit.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= SECTION 4 — WHY THIS APPROACH ================= -->
+  <section class="section" id="why">
+    <div class="wrap">
+      <h2>Why this is different</h2>
+      <div class="cards">
+        <article class="card">
+          <h3>Survivorship-bias corrected</h3>
+          <p>Tests run against real point-in-time S&amp;P 500 membership — including
+             the companies that were removed. Most backtests quietly delete the
+             losers, which inflates returns by roughly 2.6–4.3%/yr.</p>
+        </article>
+        <article class="card">
+          <h3>An honesty badge on every result</h3>
+          <p>Every winner is re-checked on held-out data. If it decays
+             out-of-sample, we say so instead of hiding it.</p>
+        </article>
+        <article class="card">
+          <h3>Six strategy classes, not one-size-fits-all</h3>
+          <p>Trend, breakout, mean reversion, volatility stops, dual momentum and
+             factor scoring — compared per stock, per timeframe.</p>
+        </article>
+        <article class="card">
+          <h3>Transparent about its stage</h3>
+          <p>This is an early research prototype built by an independent developer.
+             No fake testimonials, no invented user counts, no logos.</p>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= SECTION 5 — THE OFFER + FINAL CTA ================= -->
+  <section class="section section-alt" id="offer">
+    <div class="wrap narrow">
+      <h2>What you get</h2>
+      <div class="offer">
+        <div class="price-card featured">
+          <h3>Free</h3>
+          <p class="price">$0</p>
+          <ul>
+            <li>Winning-strategy report for one ticker</li>
+            <li>Out-of-sample honesty check</li>
+            <li>Current buy/sell signal by email</li>
+          </ul>
+          <button type="button" class="btn btn-primary price-btn" data-focus-form="offer">
+            Get my free signal →
+          </button>
+        </div>
+        <div class="price-card">
+          <h3>Pro <span class="tag-soon">proposed</span></h3>
+          <p class="price">$19<span>/mo</span></p>
+          <ul>
+            <li>Daily signals for up to 10 tickers</li>
+            <li>Full 1/3/5/10-year strategy breakdown</li>
+            <li>Watchlist alerts</li>
+          </ul>
+          <p class="price-cta-label muted">Not built yet — we’re testing demand first.</p>
+        </div>
+      </div>
+
+      <form class="lead-form" id="offer-form" novalidate>
+        <h3 class="form-title">Get the free signal for your ticker</h3>
+        <div class="field-row">
+          <label class="visually-hidden" for="offer-ticker">Ticker</label>
+          <input id="offer-ticker" name="ticker" type="text" placeholder="Ticker (e.g. AAPL)" maxlength="6" autocomplete="off" />
+          <label class="visually-hidden" for="offer-email">Email</label>
+          <input id="offer-email" name="email" type="email" placeholder="you@email.com" autocomplete="email" />
+          <button type="submit" class="btn btn-primary" data-cta="offer">Send my signal →</button>
+        </div>
+        <p class="microcopy" id="offer-msg" role="status" aria-live="polite">
+          We’ll only email this signal. No spam, unsubscribe anytime.
+        </p>
+      </form>
+    </div>
+  </section>
+
+  <footer class="footer">
+    <div class="wrap">
+      <p class="who">
+        <strong>Who’s behind this:</strong>
+        <!-- TODO: replace with your real name + one-line background -->
+        An independent developer building quantitative research tooling for the S&amp;P 500.
+      </p>
+      <p class="disclaimer">
+        stardust is an experimental research prototype. Nothing here is investment
+        advice or a solicitation to trade. Historical strategy fit does not predict
+        future returns. Signals shown are derived from historical backtests and may
+        not reflect live execution. <a href="mailto:anil.ojblabs@gmail.com">Contact</a>
+      </p>
+      <p class="copy">© 2026 stardust</p>
+    </div>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>
