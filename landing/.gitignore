@@ -1,0 +1,7 @@
+# Runtime experiment data — never commit captured leads/events.
+data/
+
+# Local scratch
+*.log
+.venv/
+__pycache__/
