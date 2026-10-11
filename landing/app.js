@@ -94,12 +94,173 @@
     });
   }
   function fmtPct(v) { return (v == null || isNaN(v)) ? "—" : (v * 100).toFixed(0) + "%"; }
+  function debounce(fn, wait) {
+    var t;
+    return function () {
+      var ctx = this, args = arguments;
+      clearTimeout(t);
+      t = setTimeout(function () { fn.apply(ctx, args); }, wait);
+    };
+  }
 
   var WINDOW_LABELS = { "1y": "1 year", "3y": "3 years", "5y": "5 years", "10y": "10 years" };
+
+  /* ---------- company-name search (offline ticker index) ----------
+   * /tickers.json is a tiny ticker -> company-name index generated from the
+   * S&P 500 membership table. It lets a visitor type a company name ("Apple",
+   * "Bank of America") instead of a ticker; we resolve it locally, so the
+   * landing page stays self-contained (no backend lookup, no network).
+   */
+  var COMPANY_STOP = ["an", "and", "co", "company", "corp", "corporation", "group", "holding",
+    "holdings", "inc", "incorporated", "limited", "llc", "ltd", "of", "plc", "sa", "the"];
+  var COMPANY_INDEX = [];    // { ticker, name, norm, tokens }
+  var COMPANY_TICKERS = {};  // ticker -> true
+
+  function normName(s) {
+    return String(s == null ? "" : s).toLowerCase().replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
+  }
+  function nameTokens(s) {
+    return normName(s).split(" ").filter(function (t) { return t && COMPANY_STOP.indexOf(t) < 0; });
+  }
+  // Ticker canonical form for matching, e.g. "brk.b" -> "BRK-B".
+  function canonTicker(v) { return normTicker(v).replace(/\./g, "-"); }
+
+  function loadTickerIndex() {
+    fetch("/tickers.json")
+      .then(function (r) { return r.ok ? r.json() : { tickers: [] }; })
+      .then(function (j) {
+        COMPANY_INDEX = (j.tickers || []).map(function (e) {
+          var ticker = String(e.ticker || "").toUpperCase();
+          var name = e.name || ticker;
+          return { ticker: ticker, name: name, norm: normName(name), tokens: nameTokens(name) };
+        });
+        COMPANY_INDEX.forEach(function (e) { COMPANY_TICKERS[e.ticker] = true; });
+      })
+      .catch(function () {});
+  }
+
+  function companyRank(qn, qt, rec) {
+    if (!qt.length) return 0;
+    if (qn === rec.norm) return 6;
+    if (qt.every(function (t) { return rec.tokens.indexOf(t) >= 0; })) return 5;
+    if (rec.norm.indexOf(qn) >= 0) return 4;
+    if (qn.indexOf(rec.norm) >= 0) return 3;
+    for (var i = 0; i < qt.length; i++) {
+      if (qt[i].length >= 3 && rec.norm.indexOf(qt[i]) >= 0) return 1;
+    }
+    return 0;
+  }
+
+  function searchCompanies(query, limit) {
+    var raw = (query || "").trim();
+    if (!raw || !COMPANY_INDEX.length) return [];
+    var qn = normName(raw), qt = nameTokens(raw), sym = canonTicker(raw);
+    var out = [];
+    for (var i = 0; i < COMPANY_INDEX.length; i++) {
+      var rec = COMPANY_INDEX[i];
+      var rank = 0;
+      if (sym && sym === rec.ticker) rank = 7;
+      var nr = companyRank(qn, qt, rec);
+      if (nr > rank) rank = nr;
+      if (rank > 0) out.push({ ticker: rec.ticker, name: rec.name, rank: rank, len: rec.norm.length });
+    }
+    out.sort(function (a, b) {
+      if (b.rank !== a.rank) return b.rank - a.rank;
+      if (a.len !== b.len) return a.len - b.len;
+      return a.ticker < b.ticker ? -1 : a.ticker > b.ticker ? 1 : 0;
+    });
+    return out.slice(0, limit || 8);
+  }
+
+  // Turn whatever the visitor typed into a ticker: exact symbol wins, then a
+  // confident company-name match, then a bare symbol, else "" (email still captured).
+  function resolveTicker(raw) {
+    var v = (raw || "").trim();
+    if (!v) return "";
+    var sym = canonTicker(v);
+    if (COMPANY_TICKERS[sym]) return sym;
+    var hits = searchCompanies(v, 1);
+    if (hits.length && hits[0].rank >= 4) return hits[0].ticker;
+    return /\s/.test(v) ? "" : sym;
+  }
+
+  /* ---------- ticker autocomplete dropdown ---------- */
+  function attachCombo(input) {
+    var box = document.createElement("div");
+    box.className = "combo-suggest";
+    box.setAttribute("role", "listbox");
+    box.hidden = true;
+    document.body.appendChild(box);
+
+    var hits = [], active = -1;
+
+    function position() {
+      var r = input.getBoundingClientRect();
+      box.style.left = r.left + "px";
+      box.style.top = (r.bottom + 4) + "px";
+      box.style.width = r.width + "px";
+    }
+    function close() { box.hidden = true; box.innerHTML = ""; hits = []; active = -1; }
+    function choose(i) {
+      if (i < 0 || i >= hits.length) return;
+      input.value = hits[i].ticker;
+      close();
+      if (input.id === "demo-ticker") lookup(input.value);
+    }
+    function render() {
+      if (!hits.length) { close(); return; }
+      position();
+      box.hidden = false;
+      box.innerHTML = hits.map(function (h, i) {
+        return '<div class="combo-item' + (i === active ? " active" : "") + '" data-i="' + i +
+          '" role="option"><span class="combo-ticker">' + esc(h.ticker) +
+          '</span><span class="combo-name">' + esc(h.name) + "</span></div>";
+      }).join("");
+    }
+    function update() {
+      active = -1;
+      var q = input.value.trim();
+      if (!q) { close(); return; }
+      hits = searchCompanies(q, 8);
+      render();
+    }
+
+    input.addEventListener("input", debounce(update, 80));
+    input.addEventListener("focus", update);
+    input.addEventListener("keydown", function (e) {
+      if (box.hidden) return;
+      if (e.key === "ArrowDown") { e.preventDefault(); active = (active + 1) % hits.length; render(); }
+      else if (e.key === "ArrowUp") { e.preventDefault(); active = (active - 1 + hits.length) % hits.length; render(); }
+      else if (e.key === "Enter") { if (active >= 0) { e.preventDefault(); choose(active); } }
+      else if (e.key === "Escape" || e.key === "Tab") { close(); }
+    });
+    box.addEventListener("mousedown", function (e) {
+      var item = e.target.closest ? e.target.closest(".combo-item") : null;
+      if (item) { e.preventDefault(); choose(parseInt(item.getAttribute("data-i"), 10)); }
+    });
+    input.addEventListener("blur", function () { setTimeout(close, 140); });
+    input.addEventListener("scroll", position);
+    window.addEventListener("scroll", function () { if (!box.hidden) position(); }, true);
+    window.addEventListener("resize", function () { if (!box.hidden) position(); });
+  }
 
   /* ---------- interactive prototype ---------- */
   var demoResult = $("#demo-result");
   var demoKnown = [];
+  var lastTicker = "";      // last ticker looked up in the demo
+  var pendingTicker = "";   // ticker a visitor tried to unlock
+
+  // Signal gate: the historical strategy fit is free for everyone; the live
+  // buy/sell call is the one actionable thing, so it takes an email. Unlocking
+  // is client-side only (persisted per browser) — far less to build than
+  // accounts/auth, and enough to make the "email for the signal" test honest.
+  var SIGNALS_UNLOCKED = false;
+  try { SIGNALS_UNLOCKED = localStorage.getItem("sd_unlocked") === "1"; } catch (e) {}
+  function signalsUnlocked() { return SIGNALS_UNLOCKED; }
+  function unlockSignals() {
+    SIGNALS_UNLOCKED = true;
+    try { localStorage.setItem("sd_unlocked", "1"); } catch (e) {}
+  }
 
   function renderResult(resp) {
     var t = resp.data;
@@ -117,8 +278,13 @@
     html += '<div class="result-head">';
     html += '<span class="name">' + esc(t.name || resp.ticker) + '</span>';
     html += '<span class="sym">' + esc(resp.ticker) + '</span>';
-    html += '<span class="signal-pill signal-' + esc(dir) + '">' + esc(dir) +
-            (sig.strategy ? ' · ' + esc(sig.strategy) : '') + '</span>';
+    if (signalsUnlocked()) {
+      html += '<span class="signal-pill signal-' + esc(dir) + '">' + esc(dir) +
+              (sig.strategy ? ' · ' + esc(sig.strategy) : '') + '</span>';
+    } else {
+      html += '<button type="button" class="signal-pill signal-locked" data-unlock="' +
+              esc(resp.ticker) + '">🔒 Live signal — unlock by email</button>';
+    }
     html += '</div>';
 
     html += '<div class="matrix">';
@@ -146,13 +312,31 @@
       html += '<p class="note">Out-of-sample check: ' + esc(resp.oos_definition) + '.</p>';
     }
     html += '<p class="note">Illustrative prototype output from historical backtests. ' +
-            'Not investment advice. <a href="#offer">Get this signal by email →</a></p>';
+            'Not investment advice. ' + (signalsUnlocked()
+              ? 'Live signal unlocked for this browser ✓'
+              : '<a href="#offer">Get this signal by email →</a>') + '</p>';
     demoResult.innerHTML = html;
+
+    var lockBtn = demoResult.querySelector("[data-unlock]");
+    if (lockBtn) {
+      lockBtn.addEventListener("click", function () {
+        pendingTicker = lockBtn.getAttribute("data-unlock") || "";
+        track("cta_click", { cta: "unlock_signal", ticker: pendingTicker });
+        ["#hero-ticker", "#offer-ticker"].forEach(function (sel) {
+          var el = $(sel); if (el) el.value = pendingTicker;
+        });
+        var offer = document.getElementById("offer");
+        if (offer) offer.scrollIntoView({ behavior: "smooth", block: "center" });
+        var email = offer && offer.querySelector('input[type="email"]');
+        if (email) setTimeout(function () { email.focus({ preventScroll: true }); }, 450);
+      });
+    }
   }
 
-  function lookup(ticker) {
-    ticker = normTicker(ticker);
+  function lookup(raw) {
+    var ticker = resolveTicker(raw);
     if (!ticker) return;
+    lastTicker = ticker;
     track("ticker_lookup", { ticker: ticker });
     demoResult.innerHTML = '<p class="muted">Running six strategies on ' + esc(ticker) + '…</p>';
     fetch("/api/demo?ticker=" + encodeURIComponent(ticker))
@@ -209,7 +393,7 @@
     var emailEl = form.querySelector('input[type="email"]');
     var msg = form.querySelector(".microcopy");
     var btn = form.querySelector('button[type="submit"]');
-    var ticker = normTicker(tickerEl && tickerEl.value);
+    var ticker = resolveTicker(tickerEl && tickerEl.value);
     var email = (emailEl && emailEl.value || "").trim();
 
     if (!validEmail(email)) {
@@ -235,6 +419,13 @@
       .then(function (res) {
         if (!res.ok || !res.body.ok) throw new Error((res.body && res.body.error) || "Signup failed");
         track("email_submit", { ticker: ticker, cta: cta });
+        if (!signalsUnlocked()) {
+          unlockSignals();
+          track("signal_unlock", { ticker: ticker });
+          var reveal = ticker || pendingTicker || lastTicker;
+          pendingTicker = "";
+          if (reveal) lookup(reveal);  // re-render the demo with the live call now visible
+        }
         showSuccess(form, ticker);
       })
       .catch(function (err) {
@@ -248,8 +439,8 @@
     wrap.className = "success-block";
     wrap.innerHTML =
       '<p class="microcopy success">✓ You’re in. ' +
-      (ticker ? 'We’ll email the current signal for <strong>' + esc(ticker) + '</strong>.' :
-                'We’ll email your ticker’s current signal.') +
+      (ticker ? 'We’ll email the current signal for <strong>' + esc(ticker) + '</strong> — and alert you when it flips.' :
+                'We’ll email your ticker’s current signal — and alert you when it flips.') +
       '</p>' +
       '<p class="note">Help us shape the paid version — would you pay for daily signals?</p>' +
       '<div class="quickpicks">' +
@@ -275,4 +466,10 @@
   // Pre-load the known-ticker list so quick picks feel responsive.
   fetch("/api/demo?ticker=").then(function (r) { return r.json(); })
     .then(function (j) { demoKnown = j.known || []; }).catch(function () {});
+
+  // Company-name index + per-field autocomplete ("Apple" -> AAPL).
+  loadTickerIndex();
+  ["#hero-ticker", "#demo-ticker", "#offer-ticker"].forEach(function (sel) {
+    var el = $(sel); if (el) attachCombo(el);
+  });
 })();

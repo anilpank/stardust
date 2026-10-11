@@ -140,6 +140,12 @@ class TestStaticRoutes:
     def test_unknown_api_path_404(self, client):
         assert client.get("/api/nope").status_code == 404
 
+    def test_ticker_index_served(self, client):
+        resp = client.get("/tickers.json")
+        assert resp.status_code == 200
+        tickers = {e["ticker"] for e in resp.get_json()["tickers"]}
+        assert "AAPL" in tickers
+
 
 class TestDemoEndpoint:
     @pytest.fixture

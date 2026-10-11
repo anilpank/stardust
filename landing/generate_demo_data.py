@@ -95,62 +95,71 @@ def _metrics(result: dict) -> dict:
     }
 
 
-def build(tickers: list[str], data_dir: Path, skip_oos: bool, min_trades: int) -> dict:
-    generated = {
+def _empty_payload() -> dict:
+    return {
         "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "oos_definition": OOS_DEFINITION,
         "windows": list(WINDOWS.keys()),
         "tickers": {},
     }
 
-    for ticker in tickers:
-        end = _latest_date(ticker, data_dir)
-        if end is None:
-            print(f"  ! {ticker}: no price data, skipping")
+
+def build_ticker(ticker: str, data_dir: Path, skip_oos: bool, min_trades: int) -> dict | None:
+    """Compute one ticker's entry, or ``None`` when it has no price data."""
+    end = _latest_date(ticker, data_dir)
+    if end is None:
+        print(f"  ! {ticker}: no price data, skipping")
+        return None
+
+    entry: dict = {
+        "name": company_name(ticker) or ticker,
+        "signal": {"direction": "HOLD", "strength": 0.0, "as_of": None, "strategy": None},
+        "windows": {},
+    }
+    print(f"  {ticker} ({entry['name']}) — data through {end.date()}")
+
+    for wlabel, years in WINDOWS.items():
+        start = _window_start(end, years)
+        print(f"    {wlabel}: running six strategies from {start} …")
+        results = analyze_company(ticker, start, None, universe="current", data_dir=data_dir)
+        summary = company_summary_frame(results)
+        rec = recommend_strategy(summary, min_trades=min_trades)
+        if not rec:
+            entry["windows"][wlabel] = {"strategy": None, "oos": None}
             continue
 
-        entry: dict = {
-            "name": company_name(ticker) or ticker,
-            "signal": {"direction": "HOLD", "strength": 0.0, "as_of": None, "strategy": None},
-            "windows": {},
+        winner = rec["strategy"]
+        win_result = results.get(winner, {})
+        cell = {
+            "strategy": winner,
+            "low_confidence": bool(rec.get("low_confidence")),
+            "oos": None,
         }
-        print(f"  {ticker} ({entry['name']}) — data through {end.date()}")
+        cell.update(_metrics(win_result))
+        entry["windows"][wlabel] = cell
 
-        for wlabel, years in WINDOWS.items():
-            start = _window_start(end, years)
-            print(f"    {wlabel}: running six strategies from {start} …")
-            results = analyze_company(ticker, start, None, universe="current", data_dir=data_dir)
-            summary = company_summary_frame(results)
-            rec = recommend_strategy(summary, min_trades=min_trades)
-            if not rec:
-                entry["windows"][wlabel] = {"strategy": None, "oos": None}
-                continue
+        if wlabel == "1y":  # shortest window drives the "current" signal
+            entry["signal"] = _latest_signal(win_result)
 
-            winner = rec["strategy"]
-            win_result = results.get(winner, {})
-            cell = {
-                "strategy": winner,
-                "low_confidence": bool(rec.get("low_confidence")),
-                "oos": None,
-            }
-            cell.update(_metrics(win_result))
-            entry["windows"][wlabel] = cell
+        if skip_oos:
+            continue
+        holdout = _holdout_start(ticker, data_dir, start)
+        if holdout:
+            ho = analyze_company(ticker, holdout, None, universe="current",
+                                 data_dir=data_dir, strategy_labels=[winner])
+            ho_metrics = _metrics(ho.get(winner, {}))
+            if ho_metrics["trades_completed"] >= 2:
+                cell["oos"] = bool(ho_metrics["total_pnl"] >= 0 and ho_metrics["win_rate"] >= 0.5)
 
-            if wlabel == "1y":  # shortest window drives the "current" signal
-                entry["signal"] = _latest_signal(win_result)
+    return entry
 
-            if skip_oos:
-                continue
-            holdout = _holdout_start(ticker, data_dir, start)
-            if holdout:
-                ho = analyze_company(ticker, holdout, None, universe="current",
-                                     data_dir=data_dir, strategy_labels=[winner])
-                ho_metrics = _metrics(ho.get(winner, {}))
-                if ho_metrics["trades_completed"] >= 2:
-                    cell["oos"] = bool(ho_metrics["total_pnl"] >= 0 and ho_metrics["win_rate"] >= 0.5)
 
-        generated["tickers"][ticker] = entry
-
+def build(tickers: list[str], data_dir: Path, skip_oos: bool, min_trades: int) -> dict:
+    generated = _empty_payload()
+    for ticker in tickers:
+        entry = build_ticker(ticker, data_dir, skip_oos, min_trades)
+        if entry is not None:
+            generated["tickers"][ticker] = entry
     return generated
 
 
@@ -161,14 +170,32 @@ def main() -> None:
     parser.add_argument("--data-dir", default=str(DEFAULT_DATA_DIR))
     parser.add_argument("--skip-oos", action="store_true", help="Skip the out-of-sample holdout check")
     parser.add_argument("--min-trades", type=int, default=3)
+    parser.add_argument("--resume", action="store_true",
+                        help="Keep tickers already in --output and compute only the rest")
     args = parser.parse_args()
 
     data_dir = Path(args.data_dir)
-    print(f"Generating demo data for: {', '.join(args.tickers)}")
-    payload = build(args.tickers, data_dir, args.skip_oos, args.min_trades)
-
     out = Path(args.output)
-    out.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+    if args.resume and out.exists():
+        payload = json.loads(out.read_text(encoding="utf-8"))
+        payload.setdefault("tickers", {})
+        print(f"Resuming — {len(payload['tickers'])} tickers already in {out}")
+    else:
+        payload = _empty_payload()
+
+    print(f"Generating demo data for: {', '.join(args.tickers)}")
+    for i, ticker in enumerate(args.tickers, 1):
+        if args.resume and ticker in payload["tickers"]:
+            continue
+        entry = build_ticker(ticker, data_dir, args.skip_oos, args.min_trades)
+        if entry is not None:
+            payload["tickers"][ticker] = entry
+        # Checkpoint after every ticker so a long full-universe run is resumable.
+        payload["generated_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        out.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        print(f"    [{i}/{len(args.tickers)}] {len(payload['tickers'])} tickers written")
+
     print(f"\nWrote {out}  ({len(payload['tickers'])} tickers)")
 
 
