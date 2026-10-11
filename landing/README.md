@@ -44,35 +44,55 @@ pip install flask          # gunicorn only needed for production
 python landing/server.py   # http://127.0.0.1:8000
 ```
 
-Regenerate the prototype numbers (run from the repo root, not `landing/`):
+The page serves two pre-generated JSON files that ship with the repo
+(`demo_signals.json`, `tickers.json`), so it runs with no engine and no Parquet
+data. To (re)generate them, see **Updating the demo data** below.
+
+---
+
+## Updating the demo data
+
+The page serves two committed JSON files. Both are produced **offline** by
+scripts — the server never runs the engine, it only reads the JSON:
+
+| File | What it is | Regenerate with |
+|------|------------|-----------------|
+| `demo_signals.json` | Winning strategy per ticker × timeframe, OOS badge, current signal | `generate_demo_data.py` |
+| `tickers.json` | ticker → company name, powers company-name search | `generate_ticker_index.py` |
+
+**When to update:** after refreshing price data (`thermaltrend/download_data.py`
+or `thermaltrend/update_data.py`), after S&P 500 membership changes, or before a
+(re)launch so the signals and names are current. Both files are committed, so a
+refresh is just: regenerate → commit → redeploy. `demo_signals.json` records its
+own `generated_at`, and every current signal carries an `as_of` date.
+
+Run both **from the repo root** on a machine with the full repo + Parquet data
+(the generators import `thermaltrend`):
 
 ```bash
-python landing/generate_demo_data.py                     # default 8 tickers
-python landing/generate_demo_data.py --tickers AAPL NVDA KO
-python landing/generate_demo_data.py --skip-oos          # much faster
-```
+# 1. Company-name index (fast). From the current S&P 500 membership table.
+python landing/generate_ticker_index.py
 
-To cover the whole S&P 500 (so every search shows a report), pass the full
-ticker list. It's long-running, so it checkpoints after each ticker and
-`--resume` continues where it left off:
-
-```bash
+# 2. Signals for the whole S&P 500. Long-running (~3s/ticker, ~25-30 min).
+#    Checkpoints after every ticker and --resume continues an interrupted run.
 python landing/generate_demo_data.py --resume \
   --tickers $(python -c "import json;print(' '.join(e['ticker'] for e in json.load(open('landing/tickers.json'))['tickers']))")
 ```
 
-Regenerate the company-name search index (also from the repo root). Visitors can
-type a company name — "Apple", "Bank of America" — in any ticker field and pick
-from an autocomplete list; this builds the offline `tickers.json` that powers it
-from the current S&P 500 membership table:
+Useful flags for `generate_demo_data.py`:
 
-```bash
-python landing/generate_ticker_index.py                  # writes landing/tickers.json
-```
+- `--tickers AAPL NVDA KO` — a subset instead of the whole index.
+- `--skip-oos` — skip the out-of-sample holdout (much faster; drops the honesty badge).
+- `--min-trades N` — minimum trades for a strategy to be recommended (default 3).
+- `--resume` — keep tickers already in `--output`; **omit it to overwrite** the
+  file with a fresh run (e.g. when you only want a specific subset).
 
-> The generator imports the `thermaltrend` package and reads its Parquet data, so
-> run it on a machine that has the full repo. The **server** does not need any of
-> that — it only serves the pre-generated JSON.
+Then commit `landing/demo_signals.json` and `landing/tickers.json` and redeploy
+(the Docker image bakes them in — see `Dockerfile`).
+
+> A ticker missing from `demo_signals.json` (or without price data) is not a dead
+> end: the page shows the "we don't have a cached report" message and still
+> captures the visitor's email, so unknown tickers don't need any configuration.
 
 ---
 
@@ -222,9 +242,10 @@ which flows into both CSVs so you can attribute conversions.
 2. **`app.js`** — optionally set `ANALYTICS.posthogKey` or
    `ANALYTICS.plausibleDomain` for third-party analytics (first-party still works
    without them).
-3. **Ticker coverage** — regenerate `demo_signals.json` with the tickers you want
-   to showcase. Any ticker not in the JSON still captures an email ("we'll send
-   the report when ready"), so unknown tickers are not dead ends.
+3. **Ticker coverage** — the repo ships signals for the full S&P 500; refresh them
+   with the *Updating the demo data* procedure above. Any ticker not in the JSON
+   still captures an email ("we'll send the report when ready"), so unknown
+   tickers are not dead ends.
 4. **Compliance language** — keep it as research/educational. Review the footer
    disclaimer before publishing.
 

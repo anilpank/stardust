@@ -486,20 +486,27 @@ pip install flask            # already covered by requirements.txt
 python landing/server.py     # http://127.0.0.1:8000
 ```
 
-Regenerate the prototype numbers (run from the repo root, needs the full repo +
-Parquet data):
+### Updating the demo data
+
+The page serves two committed JSON files, produced **offline** by scripts (the
+server never runs the engine — it only reads the JSON):
 
 ```bash
-python landing/generate_demo_data.py                  # default 8 tickers
-python landing/generate_demo_data.py --skip-oos       # much faster
+# company-name index (fast) — writes landing/tickers.json
+python landing/generate_ticker_index.py
+
+# signals for the whole S&P 500 — writes landing/demo_signals.json.
+# Long-running (~3s/ticker, ~25-30 min); checkpoints per ticker, so
+# --resume safely continues an interrupted run.
+python landing/generate_demo_data.py --resume \
+  --tickers $(python -c "import json;print(' '.join(e['ticker'] for e in json.load(open('landing/tickers.json'))['tickers']))")
 ```
 
-Precompute the whole S&P 500 (long-running; checkpointed per ticker, so
-`--resume` safely continues an interrupted run):
-
-```bash
-python landing/generate_demo_data.py --resume --tickers $(python -c "import json;print(' '.join(e['ticker'] for e in json.load(open('landing/tickers.json'))['tickers']))")
-```
+Then commit both JSON files and redeploy (the Docker image bakes them in). Run
+these from the repo root — they need the full repo + Parquet data. Refresh after
+price-data updates, S&P 500 membership changes, or before a launch. See
+[`landing/README.md`](landing/README.md) for all flags (`--skip-oos`,
+`--tickers`, `--min-trades`) and the full procedure.
 
 ### View recorded leads — the admin console
 
