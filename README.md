@@ -54,6 +54,17 @@ thermaltrend/
 │                                  #   Data Explorer, Compare Tickers, Company Universe
 ├── charts.py                      # Plotly chart builders used by the dashboard
 └── tests/                         # 585 tests across 30 files (553 fast unit + 32 integration)
+
+landing/                           # Signals sales/validation landing page (see its own README)
+├── index.html                     # The landing page (hero → problem → how → why → offer)
+├── styles.css / app.js            # Styling + ticker lookup, funnel tracking, signup
+├── server.py                      # Flask app: page + /api/signup, /api/track, /api/demo, /admin
+├── admin.html / admin.js / admin.css  # PIN-gated read-only experiment console
+├── generate_demo_data.py          # Runs the real engine → writes demo_signals.json
+├── demo_signals.json              # Pre-computed winning strategy per ticker × timeframe
+├── generate_ticker_index.py       # Builds tickers.json (ticker → company name)
+├── tickers.json                   # Offline index for company-name search in ticker fields
+└── tests/                         # Unit + Flask test-client integration tests
 ```
 
 ## Running Scripts
@@ -453,6 +464,66 @@ streamlit run thermaltrend/dashboard.py
 Tabs: Overview (metric cards, equity curve, drawdown, P&L distribution, price & signals), Trades, Per-Ticker, Regime, Signals, Compare, Saved Runs, plus standalone Data Explorer, Compare Tickers, and Company Universe pages. Dual Momentum is fully supported — SPY is auto-added as its benchmark. A **Universe** selector in the sidebar switches between current-member and point-in-time universes. All ticker pickers accept **company names** in addition to ticker symbols — type "Apple" or "Bank of America" and the list narrows to the matching stocks (`ticker_search.py` resolves names offline from `membership.csv`). See `USER_GUIDE.md` Section 10 for a walkthrough.
 
 **Company Universe** ranks the S&P 500 by market cap (cached in `data/equities/market_cap.csv`, refreshed via `python -m thermaltrend.company_universe --refresh`) and provides a per-company drilldown: click any company to run all six strategies on it and see the individual trades and P&L of each, plus a data-driven recommendation of which strategy to follow (`recommend_strategy`).
+
+## Signals Landing Page
+
+`landing/` is a standalone, single-purpose sales page that tests whether S&P 500
+investors will trade an email for a stock's winning strategy + current buy/sell
+signal. It's a market experiment, not a website: static HTML/CSS/JS frontend, one
+small Flask backend that records signups and funnel events to CSV. Visitors can
+search any ticker field by company name ("Apple" → AAPL), using an offline
+`tickers.json` index. The demo shows the full historical strategy fit for the
+whole S&P 500 for free; only the live buy/sell call is gated behind an email
+(unlocked client-side after signup). The demo numbers are produced by the real
+engine (`generate_demo_data.py`), so the prototype is honest. Full details —
+experiment design, deployment, what gets recorded — live in
+[`landing/README.md`](landing/README.md).
+
+### Run it locally
+
+```bash
+pip install flask            # already covered by requirements.txt
+python landing/server.py     # http://127.0.0.1:8000
+```
+
+Regenerate the prototype numbers (run from the repo root, needs the full repo +
+Parquet data):
+
+```bash
+python landing/generate_demo_data.py                  # default 8 tickers
+python landing/generate_demo_data.py --skip-oos       # much faster
+```
+
+Precompute the whole S&P 500 (long-running; checkpointed per ticker, so
+`--resume` safely continues an interrupted run):
+
+```bash
+python landing/generate_demo_data.py --resume --tickers $(python -c "import json;print(' '.join(e['ticker'] for e in json.load(open('landing/tickers.json'))['tickers']))")
+```
+
+### View recorded leads — the admin console
+
+Open **http://127.0.0.1:8000/admin** while the server is running. It's a
+PIN-gated, read-only dashboard over the recorded CSVs: KPI cards, conversion
+funnel, traffic sources, top tickers, a leads table, an events explorer, and CSV
+export buttons (auto-refreshes every 15s).
+
+The default PIN is `5073` — **change it before deploying**. Override it (and pin
+the session key so logins survive restarts) with environment variables:
+
+```bash
+LANDING_ADMIN_PIN=2468 LANDING_SECRET_KEY=$(openssl rand -hex 32) \
+  python landing/server.py
+```
+
+The PIN guards `/api/admin/data` and the CSV exports too, not just the HTML page.
+Set `LANDING_COOKIE_SECURE=1` behind TLS in production.
+
+### Landing page tests
+
+```bash
+python -m pytest landing/tests/ -q
+```
 
 ## Running Tests
 

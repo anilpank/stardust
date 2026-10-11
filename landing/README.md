@@ -29,6 +29,8 @@ The experiment design, thresholds, and interpretation rules live in
 | `server.py` | Flask app: serves the page + `/api/signup`, `/api/track`, `/api/demo`, `/admin`. |
 | `generate_demo_data.py` | Runs the real engine → writes `demo_signals.json`. |
 | `demo_signals.json` | Pre-computed winning strategy per ticker × timeframe + OOS badge. |
+| `generate_ticker_index.py` | Builds `tickers.json` (ticker → company name) from the membership table. |
+| `tickers.json` | Offline name index so visitors can search by company name. |
 | `requirements.txt`, `Dockerfile` | Deployment. |
 | `data/` | Runtime CSV output (git-ignored). |
 
@@ -48,6 +50,24 @@ Regenerate the prototype numbers (run from the repo root, not `landing/`):
 python landing/generate_demo_data.py                     # default 8 tickers
 python landing/generate_demo_data.py --tickers AAPL NVDA KO
 python landing/generate_demo_data.py --skip-oos          # much faster
+```
+
+To cover the whole S&P 500 (so every search shows a report), pass the full
+ticker list. It's long-running, so it checkpoints after each ticker and
+`--resume` continues where it left off:
+
+```bash
+python landing/generate_demo_data.py --resume \
+  --tickers $(python -c "import json;print(' '.join(e['ticker'] for e in json.load(open('landing/tickers.json'))['tickers']))")
+```
+
+Regenerate the company-name search index (also from the repo root). Visitors can
+type a company name — "Apple", "Bank of America" — in any ticker field and pick
+from an autocomplete list; this builds the offline `tickers.json` that powers it
+from the current S&P 500 membership table:
+
+```bash
+python landing/generate_ticker_index.py                  # writes landing/tickers.json
 ```
 
 > The generator imports the `thermaltrend` package and reads its Parquet data, so
@@ -157,7 +177,19 @@ Two CSVs under `LANDING_DATA_DIR` (default `landing/data/`):
 `timestamp, event, ticker, source, visitor_id, is_return, path, referrer, meta`
 
 Events: `visit`, `return_visit`, `ticker_lookup`, `signal_view`, `cta_click`,
-`email_submit`, `wtp_yes` / `wtp_maybe` / `wtp_no`.
+`email_submit`, `signal_unlock`, `wtp_yes` / `wtp_maybe` / `wtp_no`.
+
+### The signal gate (free history vs email-gated live call)
+
+The demo shows the **full historical strategy fit** (1/3/5/10y + OOS badge) for
+every ticker, to anyone — that's the trust engine. The **live buy/sell call**
+(the one actionable thing) is gated behind an email: `renderResult()` in
+`app.js` renders a locked pill (`🔒 Live signal — unlock by email`) until signup.
+On a successful `/api/signup`, the client unlocks it, emits a `signal_unlock`
+event, and re-renders the current ticker's result. Unlock is client-side only
+(persisted per browser via `localStorage.sd_unlocked`) — no accounts or server
+gating, which is all a short experiment needs. To A/B the gate, split traffic by
+`utm_source` and compare `email_submit` and `lookups/visitor`.
 
 ### Read the funnel
 

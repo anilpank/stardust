@@ -13,7 +13,9 @@ WORKDIR /app
 COPY requirements.txt ./
 RUN pip install -r requirements.txt
 
-COPY server.py index.html styles.css app.js demo_signals.json ./
+COPY server.py index.html styles.css app.js \
+     admin.html admin.js admin.css \
+     demo_signals.json tickers.json ./
 
 # Writable location for signups.csv / events.csv (mount a volume in production).
 RUN mkdir -p /app/data
