@@ -22,7 +22,8 @@
   function load() {
     fetch("/api/admin/data", { credentials: "same-origin" })
       .then(function (r) {
-        if (r.status === 401) { showAuth(); throw new Error("unauthorized"); }
+        if (r.status === 401) throw new Error("auth");
+        if (r.status === 429) throw new Error("locked");
         return r.json();
       })
       .then(function (data) {
@@ -31,15 +32,13 @@
         state.events = data.events || [];
         state.summary = data.summary;
         render(data);
-        hideAuth();
       })
       .catch(function (err) {
-        if (err.message !== "unauthorized") $("#updated").textContent = "Load failed";
+        if (err.message === "locked") $("#updated").textContent = "Locked — too many attempts";
+        else if (err.message === "auth") $("#updated").textContent = "Reload to sign in";
+        else $("#updated").textContent = "Load failed";
       });
   }
-
-  function showAuth() { $("#auth").classList.remove("hidden"); $("#dashboard").classList.add("hidden"); }
-  function hideAuth() { $("#auth").classList.add("hidden"); $("#dashboard").classList.remove("hidden"); }
 
   /* ---------- rendering ---------- */
   function kpi(label, value, sub, accent) {
@@ -126,37 +125,8 @@
 
   $("#btn-signups").href = "/api/admin/export/signups.csv";
   $("#btn-events").href = "/api/admin/export/events.csv";
-
-  $("#pin-form").addEventListener("submit", function (e) {
-    e.preventDefault();
-    var pin = $("#pin-input").value;
-    var msg = $("#pin-msg");
-    fetch("/api/admin/login", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      credentials: "same-origin",
-      body: JSON.stringify({ pin: pin }),
-    })
-      .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, body: j }; }); })
-      .then(function (res) {
-        if (!res.ok || !res.body.ok) throw new Error(res.body.error || "Incorrect PIN.");
-        $("#pin-input").value = "";
-        msg.textContent = "";
-        load();
-      })
-      .catch(function (err) {
-        msg.textContent = err.message;
-        msg.className = "microcopy error";
-      });
-  });
-
-  $("#logout").addEventListener("click", function () {
-    fetch("/api/admin/logout", { method: "POST", credentials: "same-origin" })
-      .then(function () { showAuth(); $("#pin-input").focus(); });
-  });
+  $("#btn-db").href = "/api/admin/db";
 
   load();
-  setInterval(function () {
-    if (!$("#dashboard").classList.contains("hidden")) load();
-  }, REFRESH_MS);
+  setInterval(load, REFRESH_MS);
 })();

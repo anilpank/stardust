@@ -8,9 +8,11 @@ actually measures:
 * ``POST /api/track``  — a funnel/behaviour event (visit, ticker_lookup,
   signal_view, cta_click, return_visit, willingness-to-pay clicks...).
 
-Everything is written to plain CSV files under ``landing/data/`` so a
-lightweight spreadsheet/DB is the only "backend" needed. No third-party
-analytics required; drop in PostHog/Plausible in ``app.js`` if you want more.
+Both are written to a single SQLite database (``landing.db``) under
+``LANDING_DATA_DIR`` — the only "backend" a short experiment needs. The admin
+console reads the same DB; leads and events can be exported to CSV, and the
+whole database downloaded as a consistent snapshot. No third-party analytics
+required; drop in PostHog/Plausible in ``app.js`` if you want more.
 
 Run locally:
     python landing/server.py            # http://127.0.0.1:8000
@@ -21,30 +23,39 @@ Run in production (AWS):
 
 from __future__ import annotations
 
+import base64
 import csv
+import hashlib
 import hmac
+import io
 import json
 import os
 import re
 import secrets
+import sqlite3
 import threading
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-from flask import Flask, Response, jsonify, request, send_from_directory, session
+from flask import Flask, Response, jsonify, request, send_from_directory
 
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = Path(os.environ.get("LANDING_DATA_DIR", BASE_DIR / "data"))
+DB_PATH = DATA_DIR / "landing.db"
+# Legacy CSV output from earlier builds — read once to migrate, never written.
 SIGNUPS_CSV = DATA_DIR / "signups.csv"
 EVENTS_CSV = DATA_DIR / "events.csv"
 DEMO_JSON = BASE_DIR / "demo_signals.json"
 
-# Simple PIN gate for the /admin console. Change it before deploying:
-#     LANDING_ADMIN_PIN=2468 LANDING_SECRET_KEY=$(openssl rand -hex 32) ...
-ADMIN_PIN = os.environ.get("LANDING_ADMIN_PIN", "5073")
-# Signs the admin session cookie. Generated per-process if not supplied, which
-# only means sessions don't survive a restart (fine for a short experiment).
-SECRET_KEY = os.environ.get("LANDING_SECRET_KEY") or secrets.token_hex(32)
+# HTTP Basic auth for the /admin console. Set a password before deploying:
+#     ADMIN_PASSWORD=...         (local dev; plaintext)
+#     ADMIN_PASS_HASH=salt:hash  (production; generate with gen_admin_password.py)
+ADMIN_USER = os.environ.get("ADMIN_USER", "admin")
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "")
+ADMIN_PASS_HASH = os.environ.get("ADMIN_PASS_HASH", "")
+AUTH_FAIL_LIMIT = 6
+AUTH_FAIL_WINDOW = 5 * 60  # seconds
 
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -57,17 +68,48 @@ EVENT_FIELDS = [
     "path", "referrer", "meta",
 ]
 
+# Columns are stored as TEXT; rows are returned as plain dicts so the summary,
+# CSV export, and JSON API all share one shape.
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS signups (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp TEXT NOT NULL,
+    email TEXT NOT NULL,
+    ticker TEXT NOT NULL DEFAULT '',
+    source TEXT NOT NULL DEFAULT 'direct',
+    utm_medium TEXT NOT NULL DEFAULT '',
+    utm_campaign TEXT NOT NULL DEFAULT '',
+    referrer TEXT NOT NULL DEFAULT '',
+    visitor_id TEXT NOT NULL DEFAULT '',
+    is_return TEXT NOT NULL DEFAULT 'false',
+    user_agent TEXT NOT NULL DEFAULT '',
+    ip TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp TEXT NOT NULL,
+    event TEXT NOT NULL,
+    ticker TEXT NOT NULL DEFAULT '',
+    source TEXT NOT NULL DEFAULT 'direct',
+    visitor_id TEXT NOT NULL DEFAULT '',
+    is_return TEXT NOT NULL DEFAULT 'false',
+    path TEXT NOT NULL DEFAULT '',
+    referrer TEXT NOT NULL DEFAULT '',
+    meta TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_signups_ticker ON signups(ticker);
+CREATE INDEX IF NOT EXISTS idx_events_event ON events(event);
+CREATE INDEX IF NOT EXISTS idx_events_ticker ON events(ticker);
+"""
+
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 _TICKER_RE = re.compile(r"^[A-Z.\-]{1,6}$")
-_write_lock = threading.Lock()
+_init_lock = threading.Lock()
+_initialized: set[str] = set()
+_auth_lock = threading.Lock()
+_auth_failures: dict[str, list[float]] = {}
 
 app = Flask(__name__, static_folder=None)
-app.secret_key = SECRET_KEY
-app.config.update(
-    SESSION_COOKIE_HTTPONLY=True,
-    SESSION_COOKIE_SAMESITE="Lax",
-    SESSION_COOKIE_SECURE=os.environ.get("LANDING_COOKIE_SECURE") == "1",
-)
 try:  # honour X-Forwarded-* when running behind nginx / a load balancer
     from werkzeug.middleware.proxy_fix import ProxyFix
 
@@ -76,15 +118,65 @@ except Exception:  # pragma: no cover - werkzeug always ships ProxyFix
     pass
 
 
-def _append(path: Path, fields: list[str], row: dict) -> None:
-    """Append one row to a CSV, writing the header on first write."""
-    with _write_lock:
-        is_new = not path.exists()
-        with path.open("a", newline="", encoding="utf-8") as fh:
-            writer = csv.DictWriter(fh, fieldnames=fields, extrasaction="ignore")
-            if is_new:
-                writer.writeheader()
-            writer.writerow(row)
+def _migrate_legacy(conn: sqlite3.Connection) -> None:
+    """Import any pre-SQLite CSV output once, if the tables are still empty."""
+    for path, table, fields in (
+        (SIGNUPS_CSV, "signups", SIGNUP_FIELDS),
+        (EVENTS_CSV, "events", EVENT_FIELDS),
+    ):
+        if not path.exists():
+            continue
+        if conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]:
+            continue
+        with path.open(newline="", encoding="utf-8") as fh:
+            rows = list(csv.DictReader(fh))
+        if not rows:
+            continue
+        cols = ", ".join(fields)
+        placeholders = ", ".join("?" for _ in fields)
+        conn.executemany(
+            f"INSERT INTO {table} ({cols}) VALUES ({placeholders})",
+            [tuple(r.get(f) or "" for f in fields) for r in rows],
+        )
+
+
+def _open() -> sqlite3.Connection:
+    """Return a ready connection; create the schema (once per process) on first use."""
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    path = str(DB_PATH)
+    conn = sqlite3.connect(path, timeout=15)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=NORMAL")
+    if path not in _initialized:
+        with _init_lock:
+            if path not in _initialized:
+                conn.executescript(SCHEMA)
+                _migrate_legacy(conn)
+                conn.commit()
+                _initialized.add(path)
+    return conn
+
+
+def _insert(table: str, fields: list[str], row: dict) -> None:
+    conn = _open()
+    try:
+        cols = ", ".join(fields)
+        placeholders = ", ".join(":" + f for f in fields)
+        with conn:
+            conn.execute(f"INSERT INTO {table} ({cols}) VALUES ({placeholders})", row)
+    finally:
+        conn.close()
+
+
+def _read(table: str, fields: list[str]) -> list[dict]:
+    conn = _open()
+    try:
+        cols = "id, " + ", ".join(fields)
+        rows = conn.execute(f"SELECT {cols} FROM {table} ORDER BY id DESC").fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
 
 
 def _client_ip() -> str:
@@ -111,6 +203,14 @@ def _bool(value) -> str:
     return "true" if str(value).strip().lower() in {"1", "true", "yes"} else "false"
 
 
+def _to_csv(fields: list[str], rows: list[dict]) -> str:
+    buf = io.StringIO()
+    writer = csv.DictWriter(buf, fieldnames=fields, extrasaction="ignore")
+    writer.writeheader()
+    writer.writerows(rows)
+    return "\ufeff" + buf.getvalue()  # BOM so Excel opens UTF-8 correctly
+
+
 @app.get("/api/health")
 def health():
     return jsonify({"ok": True, "time": _now()})
@@ -127,8 +227,8 @@ def signup():
     if ticker and not _TICKER_RE.match(ticker):
         return jsonify({"ok": False, "error": "Please enter a valid ticker."}), 400
 
-    _append(
-        SIGNUPS_CSV,
+    _insert(
+        "signups",
         SIGNUP_FIELDS,
         {
             "timestamp": _now(),
@@ -155,8 +255,8 @@ def track():
         return jsonify({"ok": False, "error": "event is required"}), 400
 
     meta = data.get("meta")
-    _append(
-        EVENTS_CSV,
+    _insert(
+        "events",
         EVENT_FIELDS,
         {
             "timestamp": _now(),
@@ -194,24 +294,67 @@ def demo():
 
 
 # --------------------------------------------------------------------------- #
-# Admin view — read-only dashboard over the recorded CSVs.
+# Admin view — read-only dashboard over the recorded data.
 # --------------------------------------------------------------------------- #
-def _read_csv(path: Path) -> list[dict]:
-    if not path.exists():
-        return []
-    with path.open(newline="", encoding="utf-8") as fh:
-        return list(csv.DictReader(fh))
+def _verify_admin_password(password: str) -> bool:
+    """Check a password against ADMIN_PASS_HASH (scrypt) or ADMIN_PASSWORD (plain)."""
+    if ADMIN_PASS_HASH:
+        salt, _, expected_hex = ADMIN_PASS_HASH.partition(":")
+        if not salt or not expected_hex:
+            return False
+        try:
+            expected = bytes.fromhex(expected_hex)
+        except ValueError:
+            return False
+        derived = hashlib.scrypt(
+            password.encode(), salt=salt.encode(), n=16384, r=8, p=1, dklen=len(expected)
+        )
+        return hmac.compare_digest(derived, expected)
+    if ADMIN_PASSWORD:
+        return hmac.compare_digest(password, ADMIN_PASSWORD)
+    return False
 
 
-def _admin_ok() -> bool:
-    return session.get("admin") is True
+def _basic_credentials():
+    header = request.headers.get("Authorization", "")
+    if not header.startswith("Basic "):
+        return None
+    try:
+        raw = base64.b64decode(header[6:].strip()).decode("utf-8")
+    except (ValueError, UnicodeDecodeError):
+        return None
+    user, sep, password = raw.partition(":")
+    return (user, password) if sep else None
+
+
+def _auth_blocked(ip: str) -> bool:
+    now = time.monotonic()
+    with _auth_lock:
+        recent = [t for t in _auth_failures.get(ip, []) if now - t < AUTH_FAIL_WINDOW]
+        _auth_failures[ip] = recent
+        return len(recent) >= AUTH_FAIL_LIMIT
+
+
+def _record_auth_failure(ip: str) -> None:
+    with _auth_lock:
+        _auth_failures.setdefault(ip, []).append(time.monotonic())
 
 
 def _admin_guard():
-    """Return a 401 response unless the session has unlocked the console."""
-    if not _admin_ok():
-        return jsonify({"ok": False, "error": "unauthorized"}), 401
-    return None
+    """HTTP Basic auth guard. Returns a 401/429 response unless authorised, else None."""
+    ip = _client_ip() or "unknown"
+    if _auth_blocked(ip):
+        return jsonify({"ok": False, "error": "Too many login attempts. Try again later."}), 429
+    creds = _basic_credentials()
+    if creds and hmac.compare_digest(creds[0], ADMIN_USER) and _verify_admin_password(creds[1]):
+        with _auth_lock:
+            _auth_failures.pop(ip, None)
+        return None
+    _record_auth_failure(ip)
+    resp = jsonify({"ok": False, "error": "Unauthorized"})
+    resp.status_code = 401
+    resp.headers["WWW-Authenticate"] = 'Basic realm="stardust experiment console"'
+    return resp
 
 
 def _summary(events: list[dict], signups: list[dict]) -> dict:
@@ -263,28 +406,10 @@ def _summary(events: list[dict], signups: list[dict]) -> dict:
 
 @app.get("/admin")
 def admin_page():
+    guard = _admin_guard()
+    if guard:
+        return guard
     return send_from_directory(BASE_DIR, "admin.html")
-
-
-@app.post("/api/admin/login")
-def admin_login():
-    pin = str(_payload().get("pin", ""))
-    if hmac.compare_digest(pin, ADMIN_PIN):
-        session["admin"] = True
-        session.permanent = False
-        return jsonify({"ok": True})
-    return jsonify({"ok": False, "error": "Incorrect PIN."}), 401
-
-
-@app.post("/api/admin/logout")
-def admin_logout():
-    session.pop("admin", None)
-    return jsonify({"ok": True})
-
-
-@app.get("/api/admin/session")
-def admin_session():
-    return jsonify({"ok": True, "unlocked": _admin_ok()})
 
 
 @app.get("/api/admin/data")
@@ -292,17 +417,23 @@ def admin_data():
     guard = _admin_guard()
     if guard:
         return guard
-    events = _read_csv(EVENTS_CSV)
-    signups = _read_csv(SIGNUPS_CSV)
+    events = _read("events", EVENT_FIELDS)
+    signups = _read("signups", SIGNUP_FIELDS)
     return jsonify(
         {
             "ok": True,
             "generated_at": _now(),
             "summary": _summary(events, signups),
-            "signups": list(reversed(signups)),
-            "events": list(reversed(events)),
+            "signups": signups,
+            "events": events,
         }
     )
+
+
+_EXPORTS = {
+    "signups.csv": (SIGNUP_FIELDS, "signups"),
+    "events.csv": (EVENT_FIELDS, "events"),
+}
 
 
 @app.get("/api/admin/export/<name>")
@@ -310,14 +441,39 @@ def admin_export(name: str):
     guard = _admin_guard()
     if guard:
         return guard
-    files = {"signups.csv": SIGNUPS_CSV, "events.csv": EVENTS_CSV}
-    path = files.get(name)
-    if path is None or not path.exists():
+    spec = _EXPORTS.get(name)
+    if spec is None:
         return jsonify({"ok": False, "error": "not found"}), 404
+    fields, table = spec
     return Response(
-        path.read_text(encoding="utf-8"),
+        _to_csv(fields, _read(table, fields)),
         mimetype="text/csv",
-        headers={"Content-Disposition": f"attachment; filename={name}"},
+        headers={"Content-Disposition": f"attachment; filename={name}", "Cache-Control": "no-store"},
+    )
+
+
+@app.get("/api/admin/db")
+def admin_db():
+    """Download a consistent SQLite snapshot of the recorded leads/events."""
+    guard = _admin_guard()
+    if guard:
+        return guard
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    tmp = DATA_DIR / f".snapshot-{os.getpid()}-{secrets.token_hex(4)}.db"
+    conn = _open()
+    try:
+        if tmp.exists():
+            tmp.unlink()
+        conn.execute("VACUUM INTO ?", (str(tmp),))
+    finally:
+        conn.close()
+    data = tmp.read_bytes()
+    tmp.unlink()
+    name = f"stardust-landing-{datetime.now(timezone.utc).date().isoformat()}.db"
+    return Response(
+        data,
+        mimetype="application/vnd.sqlite3",
+        headers={"Content-Disposition": f"attachment; filename={name}", "Cache-Control": "no-store"},
     )
 
 

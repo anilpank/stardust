@@ -17,23 +17,12 @@
         <button type="button" id="refresh" class="chip">Refresh</button>
         <a class="chip" id="btn-signups" href="#">Export leads</a>
         <a class="chip" id="btn-events" href="#">Export events</a>
-        <button type="button" id="logout" class="chip">Lock</button>
+        <a class="chip" id="btn-db" href="#">Download DB</a>
       </span>
     </div>
   </header>
 
   <main class="wrap wide">
-    <section id="auth" class="auth hidden">
-      <h2>Enter PIN</h2>
-      <p class="muted">The admin console is PIN-protected. Enter the PIN to view experiment data.</p>
-      <form id="pin-form" class="field-row">
-        <input id="pin-input" type="password" inputmode="numeric" autocomplete="off"
-               placeholder="PIN" maxlength="12" aria-label="Admin PIN" />
-        <button type="submit" class="btn btn-primary">Unlock</button>
-      </form>
-      <p id="pin-msg" class="microcopy" role="status" aria-live="polite"></p>
-    </section>
-
     <div id="dashboard">
       <section class="kpis" id="kpis"></section>
 
