@@ -1,5 +1,8 @@
 # Runtime experiment data — never commit captured leads/events.
 data/
+*.db
+*.db-wal
+*.db-shm
 
 # Local scratch
 *.log

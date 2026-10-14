@@ -5,8 +5,7 @@ FROM python:3.12-slim
 
 ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
-    LANDING_DATA_DIR=/app/data \
-    LANDING_COOKIE_SECURE=1
+    LANDING_DATA_DIR=/app/data
 
 WORKDIR /app
 
@@ -17,7 +16,7 @@ COPY server.py index.html styles.css app.js \
      admin.html admin.js admin.css \
      demo_signals.json tickers.json ./
 
-# Writable location for signups.csv / events.csv (mount a volume in production).
+# Writable location for the SQLite database (mount a volume in production).
 RUN mkdir -p /app/data
 VOLUME ["/app/data"]
 
