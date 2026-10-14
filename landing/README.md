@@ -33,6 +33,9 @@ The experiment design, thresholds, and interpretation rules live in
 | `generate_ticker_index.py` | Builds `tickers.json` (ticker → company name) from the membership table. |
 | `tickers.json` | Offline name index so visitors can search by company name. |
 | `requirements.txt`, `Dockerfile` | Deployment. |
+| `deploy/provision.sh` | Idempotent Amazon Linux 2023 provisioner (systemd + nginx + certbot + backups). |
+| `deploy/backup_db.py` | Daily `VACUUM INTO` DB snapshot + pruning (systemd timer). |
+| `deploy/pull-db.sh` | Pull a DB snapshot from the server to your laptop. |
 | `data/` | Runtime SQLite database + exports (git-ignored). |
 
 ---
@@ -101,7 +104,47 @@ Then commit `landing/demo_signals.json` and `landing/tickers.json` and redeploy
 
 The container is self-contained (Flask + gunicorn + static files). Pick one:
 
-### Option A — EC2 (simplest, cheapest for a 2-week test)
+### Option A — EC2 provisioner (recommended; used for stardust.ojblabs.com)
+
+`landing/deploy/provision.sh` is an idempotent **Amazon Linux 2023** provisioner.
+It deploys only `landing/` (a sparse checkout) under `/opt/stardust`, runs it as a
+`stardust-landing` gunicorn service behind nginx, issues a dedicated Let's Encrypt
+cert, and installs a daily SQLite backup timer. It is built to coexist with other
+sites on the same instance: it never installs Node and never rewrites the global
+`nginx.conf`, so an existing `ojblabs.com` site is untouched.
+
+**1. Point DNS at the instance.** In GoDaddy → *My Products → Domains → ojblabs.com
+→ DNS*, add an **A** record `stardust` → the instance's Elastic IP (attach an
+Elastic IP first, or the record breaks on stop/start).
+
+**2. Run the provisioner on the instance:**
+
+```bash
+sudo git clone --depth 1 https://github.com/anilpank/stardust.git /root/stardust.git
+sudo bash /root/stardust.git/landing/deploy/provision.sh
+```
+
+It prints the generated admin password once (stored hashed in
+`/opt/stardust/landing/.admin.env`, mode 600). Override defaults with env vars:
+
+```bash
+sudo DOMAIN=stardust.ojblabs.com ADMIN_EMAIL=you@example.com ADMIN_PASSWORD='a-strong-password' \
+  bash /root/stardust.git/landing/deploy/provision.sh
+```
+
+Re-run the same command after merging to `main` to update (it resets to
+`origin/main` and restarts).
+
+**TLS:** Let's Encrypt certs are per-hostname, so an existing `ojblabs.com` cert
+does **not** cover `stardust.ojblabs.com`. The script issues a separate cert for
+`$DOMAIN` and reuses the existing `certbot.timer` for renewals. Only share one cert
+if it is a wildcard `*.ojblabs.com`.
+
+**Backups:** `stardust-landing-backup.timer` runs `deploy/backup_db.py` daily
+(a `VACUUM INTO` snapshot, 14 kept) into `/opt/stardust/landing/backups`. Pull one
+to your laptop with `landing/deploy/pull-db.sh`, or use the admin **Download DB**.
+
+### Option B — EC2 by hand (no provisioner)
 
 ```bash
 # on the instance
@@ -132,7 +175,7 @@ sudo systemctl enable --now stardust-landing
 Put nginx in front for TLS (Let's Encrypt) and proxy `:80/:443` → `127.0.0.1:8000`.
 `server.py` honours `X-Forwarded-For` automatically, so visitor IP/source are captured.
 
-### Option B — Docker (App Runner / ECS / any container host)
+### Option C — Docker (App Runner / ECS / any container host)
 
 ```bash
 docker build -t stardust-landing ./landing
@@ -144,7 +187,7 @@ For **AWS App Runner**: push the image to ECR and point App Runner at it. Mount
 an EFS volume at `/app/data` (or export the DB to S3 regularly) so the SQLite
 database survives restarts.
 
-### Option C — Elastic Beanstalk
+### Option D — Elastic Beanstalk
 
 `eb init`, choose the Docker platform, `eb create`, then `eb deploy`. Set the
 `LANDING_DATA_DIR` environment variable to a persistent path.

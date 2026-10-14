@@ -1,8 +1,12 @@
 # Runtime experiment data — never commit captured leads/events.
 data/
+backups/
 *.db
 *.db-wal
 *.db-shm
+
+# Server-side admin credentials (hashed) — never commit.
+.admin.env
 
 # Local scratch
 *.log
