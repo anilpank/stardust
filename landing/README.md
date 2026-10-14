@@ -132,8 +132,7 @@ sudo DOMAIN=stardust.ojblabs.com ADMIN_EMAIL=you@example.com ADMIN_PASSWORD='a-s
   bash /root/stardust.git/landing/deploy/provision.sh
 ```
 
-Re-run the same command after merging to `main` to update (it resets to
-`origin/main` and restarts).
+To ship a change after merging to `main`, see **Deploying changes (updates)** below.
 
 **TLS:** Let's Encrypt certs are per-hostname, so an existing `ojblabs.com` cert
 does **not** cover `stardust.ojblabs.com`. The script issues a separate cert for
@@ -143,6 +142,58 @@ if it is a wildcard `*.ojblabs.com`.
 **Backups:** `stardust-landing-backup.timer` runs `deploy/backup_db.py` daily
 (a `VACUUM INTO` snapshot, 14 kept) into `/opt/stardust/landing/backups`. Pull one
 to your laptop with `landing/deploy/pull-db.sh`, or use the admin **Download DB**.
+
+#### Deploying changes (updates)
+
+> **TL;DR — ship a change.** Merge to `main`, then on the instance run:
+> ```bash
+> sudo git -C /root/stardust.git pull
+> sudo bash /root/stardust.git/landing/deploy/provision.sh
+> ```
+
+The provisioner is **idempotent and re-runnable**: it fetches `origin/main`,
+sparse-checks-out `landing/`, refreshes the venv from `requirements.txt`, rewrites
+the systemd unit / nginx block / cert only when needed, and restarts the
+`stardust-landing` service. The **one prerequisite** is that `/root/stardust.git`
+is current — the provisioner you execute is the copy checked out there, so
+`git pull` it first.
+
+What each kind of change needs (all use the same two commands):
+
+| Change | Notes |
+|--------|-------|
+| `index.html` / `styles.css` / `app.js` / `*.json` | Served from disk per request; the restart just makes it uniform. |
+| `server.py` or anything in the venv | The service restart applies it. |
+| `deploy/*.sh` or `deploy/*.py` | Pull `/root/stardust.git` **first**, since that is the script that runs. |
+| Refreshed demo data | Regenerate + commit `demo_signals.json` / `tickers.json` first (see *Updating the demo data*). |
+
+**Your data is safe across updates.** `landing.db`, the CSV exports, `backups/`,
+and `.admin.env` live under `/opt/stardust/landing/` but are **git-ignored**, so
+`git reset --hard` never touches them — the admin password persists and leads are
+never lost. (They are *not* in git, so they also don't travel with a deploy.)
+
+**Verify and roll back:**
+
+```bash
+curl -s https://stardust.ojblabs.com/api/health    # {"ok":true,...}
+systemctl status stardust-landing
+```
+
+To roll back, revert on `main` and re-run the two commands, or deploy a known-good
+branch by overriding `REPO_BRANCH`:
+
+```bash
+sudo REPO_BRANCH=stable bash /root/stardust.git/landing/deploy/provision.sh
+```
+
+> **If `git pull` fails with `git@github.com: Permission denied (publickey)`** the
+> host rewrites GitHub https URLs to ssh via `/etc/gitconfig`. Root has an SSH key,
+> so `sudo git … pull` normally works; if it does not, bypass the rewrite with:
+> ```bash
+> sudo env GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null git -C /root/stardust.git pull
+> ```
+> The provisioner itself already bypasses this rewrite when it clones/updates
+> `landing/`, so only the manual root `pull` needs it.
 
 ### Option B — EC2 by hand (no provisioner)
 
@@ -334,8 +385,13 @@ python -m pytest landing/tests/ -q
 Covered: SQLite round-trips + legacy-CSV migration, the admin summary math, Basic
 auth + per-IP lockout, the signup/track/export/snapshot endpoints, the demo
 lookup, the full visit→lead→WTP funnel, and the demo-data generator's helpers
-(plus one integration run against real AAPL data, auto-skipped if unavailable). A
-`landing-tests` pre-commit hook runs these whenever `landing/` files change.
+(plus one integration run against real AAPL data, auto-skipped if unavailable).
+The deploy tooling is covered too (`test_deploy.py`): `backup_db.py`'s
+snapshot/prune logic is unit-tested and run as a real subprocess, the shell
+scripts pass `bash -n` (and `shellcheck`, when present), and the provisioner's
+isolation guarantees and machine-wide git-config bypass are asserted — `pull-db.sh`
+is driven end to end against a stubbed `curl`. A `landing-tests` pre-commit hook
+runs these whenever `landing/` files change.
 
 ---
 

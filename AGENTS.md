@@ -152,6 +152,18 @@ systemd service (`gunicorn --bind 127.0.0.1:8000 server:app`) + nginx reverse pr
 behind a proxy. For details and AWS options (EC2 / App Runner / Elastic
 Beanstalk), see the **Deploy on AWS** section of `landing/README.md`.
 
+**Shipping a change to the live EC2 instance** (stardust.ojblabs.com — the user
+runs this): update the root checkout, then re-run the idempotent provisioner —
+```sh
+sudo git -C /root/stardust.git pull
+sudo bash /root/stardust.git/landing/deploy/provision.sh
+```
+The provisioner sparse-checks-out `landing/` only, refreshes the venv, restarts
+`stardust-landing`, and touches nothing of the co-hosted `ojblabs.com` site. Data
+(`landing.db`, `backups/`, `.admin.env`) is git-ignored so updates never lose it.
+Full runbook (verify/rollback, the `/etc/gitconfig` https→ssh gotcha): see
+**Deploying changes (updates)** in `landing/README.md`.
+
 > Persistence: the SQLite DB is lost if the container/instance is replaced. For a
 > short experiment that's usually fine, but mount EFS or copy `data/landing.db` to
 > S3 regularly. The admin console's **Download DB** button returns a consistent
