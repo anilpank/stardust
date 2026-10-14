@@ -16,6 +16,22 @@ It is deliberately a **market experiment, not a website**:
 The experiment design, thresholds, and interpretation rules live in
 [`../thermaltrend/VALIDATION_EXPERIMENT.md`](../thermaltrend/VALIDATION_EXPERIMENT.md).
 
+## Deploying changes (the two commands)
+
+After you merge to `main`, run these **on the server** (via the EC2 Instance
+Connect browser session):
+
+```sh
+sudo git -C /root/stardust.git pull
+sudo bash /root/stardust.git/landing/deploy/provision.sh
+```
+
+That's it — the first pulls the latest code, the second updates the app, restarts
+`stardust-landing`, re-applies nginx and re-checks TLS, and leaves your data
+(`landing.db`, `backups/`, `.admin.env`) intact. See
+[Deploying changes (updates)](#deploying-changes-updates) for the full runbook
+(what needs a restart, rollback, and the `/etc/gitconfig` gotcha).
+
 ---
 
 ## Files
@@ -145,11 +161,12 @@ to your laptop with `landing/deploy/pull-db.sh`, or use the admin **Download DB*
 
 #### Deploying changes (updates)
 
-> **TL;DR — ship a change.** Merge to `main`, then on the instance run:
-> ```bash
-> sudo git -C /root/stardust.git pull
-> sudo bash /root/stardust.git/landing/deploy/provision.sh
-> ```
+**TL;DR — ship a change.** Merge to `main`, then on the server run:
+
+```sh
+sudo git -C /root/stardust.git pull
+sudo bash /root/stardust.git/landing/deploy/provision.sh
+```
 
 The provisioner is **idempotent and re-runnable**: it fetches `origin/main`,
 sparse-checks-out `landing/`, refreshes the venv from `requirements.txt`, rewrites
