@@ -122,7 +122,45 @@ for i in $(seq 1 15); do
 done
 
 echo "==> Configuring nginx (adds stardust.conf; ojblabs.com untouched)"
-cat >/etc/nginx/conf.d/stardust.conf <<EOF
+CERT_DIR="/etc/letsencrypt/live/$DOMAIN"
+if [ -e "$CERT_DIR/fullchain.pem" ]; then
+  # The certificate already exists (issued by an earlier run), so render the
+  # TLS server block here explicitly. Certbot only writes TLS into nginx on the
+  # run that first issues the cert; without this, a re-run would overwrite the
+  # conf with an HTTP-only block and silently break HTTPS.
+  cat >/etc/nginx/conf.d/stardust.conf <<EOF
+server {
+    listen 80;
+    listen [::]:80;
+    server_name $DOMAIN www.$DOMAIN;
+    return 301 https://\$host\$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    server_name $DOMAIN www.$DOMAIN;
+
+    ssl_certificate     $CERT_DIR/fullchain.pem;
+    ssl_certificate_key $CERT_DIR/privkey.pem;
+    include /etc/letsencrypt/options-ssl-nginx.conf;
+
+    gzip on;
+    gzip_types text/plain text/css application/json image/svg+xml;
+    client_max_body_size 1m;
+
+    location / {
+        proxy_pass http://127.0.0.1:$PORT;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+}
+EOF
+else
+  cat >/etc/nginx/conf.d/stardust.conf <<EOF
 server {
     listen 80;
     listen [::]:80;
@@ -142,6 +180,7 @@ server {
     }
 }
 EOF
+fi
 nginx -t
 systemctl reload nginx
 
