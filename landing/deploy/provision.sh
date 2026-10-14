@@ -45,19 +45,23 @@ echo "==> Creating app user ($APP_USER)"
 id -u "$APP_USER" &>/dev/null || useradd --system --create-home --shell /usr/sbin/nologin "$APP_USER"
 
 echo "==> Fetching landing code (sparse checkout: landing/ only)"
-git config --global --add safe.directory "$APP_DIR"
+# The repo is public and clones over https, so ignore any machine-wide git
+# config that rewrites GitHub https URLs to ssh (e.g.
+# `url.git@github.com:.insteadOf=https://github.com/` in /etc/gitconfig) —
+# otherwise the clone would demand SSH keys this host doesn't have.
+GIT_CLEAN=(env GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null)
 if [ -d "$APP_DIR/.git" ]; then
-  git -C "$APP_DIR" fetch --depth 1 origin "$REPO_BRANCH"
-  git -C "$APP_DIR" sparse-checkout set landing
-  git -C "$APP_DIR" reset --hard "origin/$REPO_BRANCH"
+  "${GIT_CLEAN[@]}" git -c safe.directory='*' -C "$APP_DIR" fetch --depth 1 origin "$REPO_BRANCH"
+  "${GIT_CLEAN[@]}" git -c safe.directory='*' -C "$APP_DIR" sparse-checkout set landing
+  "${GIT_CLEAN[@]}" git -c safe.directory='*' -C "$APP_DIR" reset --hard "origin/$REPO_BRANCH"
 else
   mkdir -p "$APP_DIR"
   chown "$APP_USER:$APP_USER" "$APP_DIR"
-  sudo -u "$APP_USER" git clone --filter=blob:none --no-checkout --depth 1 \
+  sudo -u "$APP_USER" "${GIT_CLEAN[@]}" git clone --filter=blob:none --no-checkout --depth 1 \
     -b "$REPO_BRANCH" "$REPO_URL" "$APP_DIR"
-  sudo -u "$APP_USER" git -C "$APP_DIR" sparse-checkout init --cone
-  sudo -u "$APP_USER" git -C "$APP_DIR" sparse-checkout set landing
-  sudo -u "$APP_USER" git -C "$APP_DIR" checkout "$REPO_BRANCH"
+  sudo -u "$APP_USER" "${GIT_CLEAN[@]}" git -C "$APP_DIR" sparse-checkout init --cone
+  sudo -u "$APP_USER" "${GIT_CLEAN[@]}" git -C "$APP_DIR" sparse-checkout set landing
+  sudo -u "$APP_USER" "${GIT_CLEAN[@]}" git -C "$APP_DIR" checkout "$REPO_BRANCH"
 fi
 mkdir -p "$LANDING_DIR/data"
 chown -R "$APP_USER:$APP_USER" "$APP_DIR"
