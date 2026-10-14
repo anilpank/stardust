@@ -237,6 +237,17 @@ class TestProvisionInvariants:
         assert "certbot --nginx -d" in text
         assert "/etc/letsencrypt/live/$DOMAIN" in text
 
+    def test_renders_tls_block_when_cert_present(self):
+        # Regression: re-running the provisioner must not strip HTTPS. The nginx
+        # config has to render its own `listen 443 ssl` block once the cert
+        # exists (certbot only injects TLS on the run that first issues it).
+        text = PROVISION.read_text()
+        assert 'CERT_DIR="/etc/letsencrypt/live/$DOMAIN"' in text
+        assert 'if [ -e "$CERT_DIR/fullchain.pem" ]' in text
+        assert "listen 443 ssl" in text
+        assert "ssl_certificate     $CERT_DIR/fullchain.pem" in text
+        assert "return 301 https://\\$host\\$request_uri" in text
+
 
 # --------------------------------------------------------------------------- #
 # pull-db.sh — behaviour with a stubbed curl
