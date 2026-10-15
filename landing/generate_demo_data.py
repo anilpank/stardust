@@ -201,7 +201,7 @@ def build(tickers: list[str], data_dir: Path, skip_oos: bool, min_trades: int
     return generated, trades_payload
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description="Generate landing-page demo signals.")
     parser.add_argument("--tickers", nargs="+", default=DEFAULT_TICKERS)
     parser.add_argument("--output", default=str(BASE_DIR / "demo_signals.json"))
@@ -213,7 +213,7 @@ def main() -> None:
     parser.add_argument("--min-trades", type=int, default=3)
     parser.add_argument("--resume", action="store_true",
                         help="Keep tickers already in --output and compute only the rest")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     data_dir = Path(args.data_dir)
     out = Path(args.output)

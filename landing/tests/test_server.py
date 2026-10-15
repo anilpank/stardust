@@ -11,6 +11,7 @@ from __future__ import annotations
 import base64
 import csv
 import json
+import os
 import sqlite3
 
 import pytest
@@ -196,6 +197,14 @@ class TestDemoEndpoint:
         body = client.get("/api/demo?ticker=AAPL").get_json()
         assert body["available"] is False
 
+    def test_metadata_without_ticker(self, client, demo_file):
+        # The page pre-loads /api/demo?ticker= to get the known list + analysis date.
+        body = client.get("/api/demo").get_json()
+        assert body["available"] is False
+        assert body["data"] is None
+        assert body["generated_at"] == "2026-01-01T00:00:00+00:00"
+        assert "AAPL" in body["known"]
+
 
 class TestTradesEndpoint:
     COLUMNS = ["Entry Date", "Entry Price", "Exit Date", "Exit Price",
@@ -232,11 +241,53 @@ class TestTradesEndpoint:
         body = client.get("/api/trades?ticker=AAPL").get_json()
         assert body["available"] is False
 
+    def test_includes_generated_at(self, client, trades_file):
+        body = client.get("/api/trades?ticker=AAPL").get_json()
+        assert body["generated_at"] == "2026-01-01T00:00:00+00:00"
+
     def test_result_cached_between_requests(self, client, trades_file):
         client.get("/api/trades?ticker=AAPL")
         cached = server._trades_cache["payload"]
         client.get("/api/trades?ticker=AAPL")
         assert server._trades_cache["payload"] is cached  # parsed once, not re-read
+
+    def test_result_reloads_when_file_changes(self, client, trades_file):
+        assert client.get("/api/trades?ticker=AAPL").get_json()["windows"]["1y"][0][0] == "2024-01-02"
+        trades_file.write_text(json.dumps({
+            "generated_at": "2026-02-02T00:00:00+00:00",
+            "columns": self.COLUMNS,
+            "trades": {"AAPL": {"1y": [["2025-06-01", 1.0, "2025-06-05", 2.0, 9.0, 9.0, 4, "stop"]]}},
+        }))
+        newer = trades_file.stat().st_mtime + 10
+        os.utime(trades_file, (newer, newer))
+        body = client.get("/api/trades?ticker=AAPL").get_json()
+        assert body["windows"]["1y"][0][0] == "2025-06-01"
+        assert body["generated_at"] == "2026-02-02T00:00:00+00:00"
+
+    def test_malformed_file_is_unavailable(self, client, tmp_path, monkeypatch):
+        bad = tmp_path / "bad.json"
+        bad.write_text("{not valid json")
+        monkeypatch.setattr(server, "TRADES_JSON", bad)
+        monkeypatch.setattr(server, "_trades_cache", {"mtime": None, "payload": None})
+        body = client.get("/api/trades?ticker=AAPL").get_json()
+        assert body["available"] is False
+        assert body["windows"] == {}
+
+
+class TestLoadTrades:
+    def test_missing_file_returns_none(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(server, "TRADES_JSON", tmp_path / "nope.json")
+        monkeypatch.setattr(server, "_trades_cache", {"mtime": None, "payload": None})
+        assert server._load_trades() is None
+
+    def test_parses_and_caches(self, tmp_path, monkeypatch):
+        path = tmp_path / "t.json"
+        path.write_text(json.dumps({"columns": [], "trades": {}}))
+        monkeypatch.setattr(server, "TRADES_JSON", path)
+        monkeypatch.setattr(server, "_trades_cache", {"mtime": None, "payload": None})
+        first = server._load_trades()
+        assert first == {"columns": [], "trades": {}}
+        assert server._load_trades() is first
 
 
 class TestSignup:
