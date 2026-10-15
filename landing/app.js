@@ -409,6 +409,26 @@
       "</thead><tbody>" + body + "</tbody></table></div>";
   }
 
+  function callBadge(dir) {
+    var d = (dir || "").toUpperCase();
+    return d ? '<span class="win-call signal-' + esc(d) + '">now ' + esc(d) + "</span>" : "";
+  }
+
+  // The headline call is a consensus: a strict majority of the windows' own
+  // calls. No majority -> "Mixed"; nothing computed -> no signal.
+  function consensusPill(sig) {
+    sig = sig || {};
+    var total = sig.total || 0;
+    if (!total) return '<span class="signal-pill signal-HOLD">No signal</span>';
+    var agree = sig.agree || 0;
+    if (sig.consensus && sig.direction) {
+      var d = String(sig.direction).toUpperCase();
+      return '<span class="signal-pill signal-' + esc(d) + '">' + esc(d) + " · " +
+        agree + " of " + total + " windows agree</span>";
+    }
+    return '<span class="signal-pill signal-MIXED">Mixed · no clear signal</span>';
+  }
+
   function winCard(wlabel, c) {
     var label = WINDOW_LABELS[wlabel] || wlabel;
     if (!c || !c.strategy) {
@@ -420,6 +440,7 @@
     var oos = "";
     if (c.oos === true) oos = '<span class="oos oos-true" title="' + esc(oosInfo.blurb) + '">✓ Held up out-of-sample</span>';
     else if (c.oos === false) oos = '<span class="oos oos-false" title="' + esc(oosInfo.blurb) + '">⚠ Likely overfit</span>';
+    var call = (signalsUnlocked() && c.call && c.call.direction) ? callBadge(c.call.direction) : "";
 
     var stats = [
       ["Win rate", fmtPct(c.win_rate)],
@@ -445,6 +466,7 @@
           esc(c.strategy) + '</span>' +
         '<span class="win-metric">Win rate ' + fmtPct(c.win_rate) + ' · ' +
           esc(c.trades_completed || 0) + ' trades</span>' +
+        call +
         oos +
         '<span class="win-caret" aria-hidden="true">▾</span>' +
       '</button>' +
@@ -470,14 +492,12 @@
     }
 
     var sig = t.signal || {};
-    var dir = (sig.direction || "HOLD").toUpperCase();
     var html = "";
     html += '<div class="result-head">';
     html += '<span class="name">' + esc(t.name || resp.ticker) + '</span>';
     html += '<span class="sym">' + esc(resp.ticker) + '</span>';
     if (signalsUnlocked()) {
-      html += '<span class="signal-pill signal-' + esc(dir) + '">' + esc(dir) +
-              (sig.strategy ? ' · ' + esc(sig.strategy) : '') + '</span>';
+      html += consensusPill(sig);
     } else {
       html += '<button type="button" class="signal-pill signal-locked" data-unlock="' +
               esc(resp.ticker) + '">🔒 Live signal — unlock by email</button>';
@@ -488,6 +508,10 @@
               esc(asOf) + '</span>';
     }
     html += '</div>';
+
+    html += '<p class="matrix-cap">' + (signalsUnlocked()
+      ? 'Headline call is the majority vote of the four windows below.'
+      : 'Each card is the strategy that fit that period best.') + '</p>';
 
     html += '<div class="matrix">';
     ["1y", "3y", "5y", "10y"].forEach(function (w) {

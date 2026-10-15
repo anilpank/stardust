@@ -2,8 +2,9 @@
 
 Runs the real stardust engine over a small set of well-known S&P 500 tickers and
 records, for each timeframe (1/3/5/10 years), which of the six strategies fit
-that stock best — plus a lightweight out-of-sample check — and the current
-buy/sell signal from the winning strategy.
+that stock best — plus a lightweight out-of-sample check — and each winner's
+current buy/sell call. The headline signal is the consensus of those calls: a
+strict majority of the windows must agree, otherwise it is reported as mixed.
 
 This keeps the landing page honest: the numbers are produced by the same engine
 the product would use, not invented.
@@ -18,6 +19,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
+import sys
+from collections import Counter, namedtuple
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
@@ -48,6 +52,10 @@ TRADE_COLUMNS = [
 
 # Swappable so tests can run the parallel path in-process (ThreadPoolExecutor).
 _pool_factory = ProcessPoolExecutor
+
+# A ticker that raised (a bug/transient error) as opposed to a legitimately
+# absent one (``None``). Kept to plain strings so it pickles back from workers.
+TickerFailure = namedtuple("TickerFailure", ["ticker", "error"])
 
 
 def _latest_date(ticker: str, data_dir: Path) -> pd.Timestamp | None:
@@ -82,6 +90,25 @@ def _holdout_start(ticker: str, data_dir: Path, window_start: str) -> str | None
         return None
 
 
+def _num(value, digits: int):
+    """Round to ``digits``, mapping missing/non-finite values to ``None``.
+
+    The engine yields ``NaN`` for some metrics (e.g. CAGR with no trades).
+    ``json.dump`` writes bare ``NaN`` for those, which the browser's strict
+    ``JSON.parse`` rejects — so normalise them to ``null`` here.
+    """
+    try:
+        f = float(value)
+    except (TypeError, ValueError):
+        return None
+    return round(f, digits) if math.isfinite(f) else None
+
+
+def _cell(value):
+    """A JSON-safe trade cell: non-finite floats become ``None``."""
+    return None if isinstance(value, float) and not math.isfinite(value) else value
+
+
 def _latest_signal(result: dict) -> dict:
     signals = result.get("signals") or []
     if not signals:
@@ -90,21 +117,63 @@ def _latest_signal(result: dict) -> dict:
     direction = getattr(last.direction, "value", str(last.direction))
     return {
         "direction": direction,
-        "strength": round(float(last.strength), 3),
+        "strength": _num(last.strength, 3),
         "as_of": pd.Timestamp(last.timestamp).strftime("%Y-%m-%d"),
         "strategy": result.get("strategy_name"),
+    }
+
+
+def _empty_signal() -> dict:
+    return {"direction": None, "agree": 0, "total": 0, "consensus": False, "as_of": None}
+
+
+def _consensus_signal(calls: dict[str, dict]) -> dict:
+    """Combine each window's winning-strategy call into a single agreed signal.
+
+    ``calls`` holds one entry per window that has a winning strategy. A window
+    that has a current, dated call (BUY/SELL/HOLD with an ``as_of``) votes; a
+    winner that produced no live signal abstains but still counts toward
+    ``total``, so the bar for a headline call is a strict majority of *all*
+    winning windows. When no window points the same way, ``direction`` is
+    ``None`` (a mixed read), ``agree`` is the largest block, and ``as_of`` is the
+    most recent call date.
+    """
+    total = sum(1 for c in calls.values() if c)
+    directions = [c["direction"] for c in calls.values()
+                  if c and c.get("direction") and c.get("as_of")]
+    if not total or not directions:
+        return _empty_signal()
+    top_dir, top_n = Counter(directions).most_common(1)[0]
+    as_of = max(c["as_of"] for c in calls.values() if c and c.get("as_of"))
+    consensus = top_n * 2 > total
+    return {
+        "direction": top_dir if consensus else None,
+        "agree": top_n,
+        "total": total,
+        "consensus": consensus,
+        "as_of": as_of,
     }
 
 
 def _metrics(result: dict) -> dict:
     m = result.get("metrics") or {}
     return {
-        "win_rate": round(float(m.get("win_rate", 0.0)), 4),
-        "total_pnl": round(float(m.get("total_return", 0.0)), 2),
-        "cagr": round(float(m.get("cagr", 0.0)), 4),
-        "sharpe": round(float(m.get("sharpe", 0.0)), 3),
-        "trades_completed": int(m.get("trades_completed", 0)),
+        "win_rate": _num(m.get("win_rate", 0.0), 4),
+        "total_pnl": _num(m.get("total_return", 0.0), 2),
+        "cagr": _num(m.get("cagr", 0.0), 4),
+        "sharpe": _num(m.get("sharpe", 0.0), 3),
+        "trades_completed": int(m.get("trades_completed", 0) or 0),
     }
+
+
+def _oos_pass(metrics: dict) -> bool:
+    """Holdout holds up only with a non-negative return and >=50% win rate.
+
+    Metrics may be ``None`` (non-finite in the engine), so guard the comparison
+    rather than relying on ``NaN``'s always-``False`` — and never crash on it.
+    """
+    total, win = metrics.get("total_pnl"), metrics.get("win_rate")
+    return bool(total is not None and win is not None and total >= 0 and win >= 0.5)
 
 
 def _empty_payload() -> dict:
@@ -130,7 +199,7 @@ def _trades(result: dict) -> list[list]:
     if frame.empty:
         return []
     records = sorted(frame.to_dict("records"), key=lambda r: r["Entry Date"], reverse=True)
-    return [[rec[col] for col in TRADE_COLUMNS] for rec in records]
+    return [[_cell(rec[col]) for col in TRADE_COLUMNS] for rec in records]
 
 
 def build_ticker(ticker: str, data_dir: Path, skip_oos: bool, min_trades: int
@@ -147,10 +216,11 @@ def build_ticker(ticker: str, data_dir: Path, skip_oos: bool, min_trades: int
 
     entry: dict = {
         "name": company_name(ticker) or ticker,
-        "signal": {"direction": "HOLD", "strength": 0.0, "as_of": None, "strategy": None},
+        "signal": _empty_signal(),
         "windows": {},
     }
     trades: dict[str, list] = {}
+    window_calls: dict[str, dict] = {}
     print(f"  {ticker} ({entry['name']}) — data through {end.date()}")
 
     for wlabel, years in WINDOWS.items():
@@ -160,24 +230,24 @@ def build_ticker(ticker: str, data_dir: Path, skip_oos: bool, min_trades: int
         summary = company_summary_frame(results)
         rec = recommend_strategy(summary, min_trades=min_trades)
         if not rec:
-            entry["windows"][wlabel] = {"strategy": None, "oos": None}
+            entry["windows"][wlabel] = {"strategy": None, "oos": None, "call": None}
             continue
 
         winner = rec["strategy"]
         win_result = results.get(winner, {})
+        call = _latest_signal(win_result)
+        window_calls[wlabel] = call
         cell = {
             "strategy": winner,
             "low_confidence": bool(rec.get("low_confidence")),
             "oos": None,
+            "call": {"direction": call["direction"], "as_of": call["as_of"]},
         }
         cell.update(_metrics(win_result))
         entry["windows"][wlabel] = cell
         rows = _trades(win_result)
         if rows:
             trades[wlabel] = rows
-
-        if wlabel == "1y":  # shortest window drives the "current" signal
-            entry["signal"] = _latest_signal(win_result)
 
         if skip_oos:
             continue
@@ -187,8 +257,9 @@ def build_ticker(ticker: str, data_dir: Path, skip_oos: bool, min_trades: int
                                  data_dir=data_dir, strategy_labels=[winner])
             ho_metrics = _metrics(ho.get(winner, {}))
             if ho_metrics["trades_completed"] >= 2:
-                cell["oos"] = bool(ho_metrics["total_pnl"] >= 0 and ho_metrics["win_rate"] >= 0.5)
+                cell["oos"] = _oos_pass(ho_metrics)
 
+    entry["signal"] = _consensus_signal(window_calls)
     return entry, trades
 
 
@@ -207,12 +278,16 @@ def build(tickers: list[str], data_dir: Path, skip_oos: bool, min_trades: int
 
 
 def _safe_build(ticker: str, data_dir: Path, skip_oos: bool, min_trades: int):
-    """build_ticker that isolates failures so one bad ticker can't kill the run."""
+    """build_ticker that isolates failures so one bad ticker can't kill the run.
+
+    Returns a :data:`TickerFailure` (never raises) so the caller can tally the
+    failure and refuse to publish an incomplete universe.
+    """
     try:
         return build_ticker(ticker, data_dir, skip_oos, min_trades)
-    except Exception as exc:  # defensive: keep a full-universe run going
-        print(f"  ! {ticker}: failed ({exc})")
-        return None
+    except Exception as exc:
+        print(f"  ! {ticker}: failed ({type(exc).__name__}: {exc})")
+        return TickerFailure(ticker, f"{type(exc).__name__}: {exc}")
 
 
 def _process_all(tickers: list[str], data_dir: Path, skip_oos: bool, min_trades: int,
@@ -235,9 +310,9 @@ def _process_all(tickers: list[str], data_dir: Path, skip_oos: bool, min_trades:
             ticker = futures[future]
             try:
                 result = future.result()
-            except Exception as exc:  # defensive: a crashed worker is a skip
-                print(f"  ! {ticker}: worker crashed ({exc})")
-                result = None
+            except Exception as exc:
+                print(f"  ! {ticker}: worker crashed ({type(exc).__name__}: {exc})")
+                result = TickerFailure(ticker, f"worker crashed: {type(exc).__name__}: {exc}")
             on_result(ticker, result)
 
 
@@ -297,12 +372,13 @@ def main(argv: list[str] | None = None) -> None:
         payload["generated_at"] = stamp
         signal_payload = dict(payload)
         signal_payload["tickers"] = _ordered(payload["tickers"], initial_signal_keys)
-        out.write_text(json.dumps(signal_payload, indent=2), encoding="utf-8")
+        out.write_text(json.dumps(signal_payload, indent=2, allow_nan=False), encoding="utf-8")
         if not args.skip_trades:
             trades_payload["generated_at"] = stamp
             trade_payload = dict(trades_payload)
             trade_payload["trades"] = _ordered(trades_payload["trades"], initial_trade_keys)
-            trades_out.write_text(json.dumps(trade_payload, separators=(",", ":")), encoding="utf-8")
+            trades_out.write_text(json.dumps(trade_payload, separators=(",", ":"), allow_nan=False),
+                                  encoding="utf-8")
 
     pending = [t for t in args.tickers if not (args.resume and t in payload["tickers"])]
 
@@ -311,11 +387,14 @@ def main(argv: list[str] | None = None) -> None:
         print(f"Using {args.workers} worker processes")
 
     done = 0
+    failures: list[TickerFailure] = []
 
     def on_result(ticker: str, result) -> None:
         nonlocal done
         done += 1
-        if result is not None:
+        if isinstance(result, TickerFailure):
+            failures.append(result)
+        elif result is not None:
             entry, trades = result
             payload["tickers"][ticker] = entry
             if not args.skip_trades:
@@ -324,6 +403,14 @@ def main(argv: list[str] | None = None) -> None:
         print(f"    [{done}/{len(pending)}] {len(payload['tickers'])} tickers written")
 
     _process_all(pending, data_dir, args.skip_oos, args.min_trades, args.workers, on_result)
+
+    if failures:
+        print(f"\n!! {len(failures)} ticker(s) FAILED — {out.name} is INCOMPLETE "
+              f"({len(payload['tickers'])} tickers).", file=sys.stderr)
+        for f in failures:
+            print(f"   - {f.ticker}: {f.error}", file=sys.stderr)
+        print("Do not commit this file; fix the failures or re-run.", file=sys.stderr)
+        raise SystemExit(1)
 
     print(f"\nWrote {out}  ({len(payload['tickers'])} tickers)")
     if not args.skip_trades:

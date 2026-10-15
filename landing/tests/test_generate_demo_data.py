@@ -94,6 +94,27 @@ class TestMetrics:
         assert out["trades_completed"] == 0
         assert out["total_pnl"] == 0.0
 
+    def test_non_finite_becomes_none(self):
+        out = gen._metrics({"metrics": {
+            "win_rate": float("nan"), "total_return": float("inf"),
+            "cagr": float("nan"), "sharpe": float("nan"), "trades_completed": 7,
+        }})
+        assert out == {
+            "win_rate": None, "total_pnl": None, "cagr": None,
+            "sharpe": None, "trades_completed": 7,
+        }
+
+
+class TestOosPass:
+    def test_passes_only_when_return_and_win_rate_hold(self):
+        assert gen._oos_pass({"total_pnl": 10.0, "win_rate": 0.6}) is True
+        assert gen._oos_pass({"total_pnl": -1.0, "win_rate": 0.9}) is False
+        assert gen._oos_pass({"total_pnl": 1.0, "win_rate": 0.4}) is False
+
+    def test_non_finite_metrics_are_false_not_a_crash(self):
+        assert gen._oos_pass({"total_pnl": None, "win_rate": None}) is False
+        assert gen._oos_pass({"total_pnl": None, "win_rate": 0.9}) is False
+
 
 class TestLatestSignal:
     def _signal(self, day, direction, strength):
@@ -123,6 +144,58 @@ class TestLatestSignal:
         assert sig["direction"] == "HOLD"
         assert sig["as_of"] is None
 
+    def test_non_finite_strength_becomes_none(self):
+        result = {"strategy_name": "X", "signals": [self._signal(3, SignalDirection.BUY, float("nan"))]}
+        assert gen._latest_signal(result)["strength"] is None
+
+
+class TestConsensusSignal:
+    def _call(self, direction, as_of):
+        return {"direction": direction, "strength": 0.5, "as_of": as_of}
+
+    def test_majority_sets_direction(self):
+        calls = {
+            "1y": self._call("BUY", "2026-09-01"),
+            "3y": self._call("BUY", "2026-08-15"),
+            "5y": self._call("SELL", "2026-07-24"),
+            "10y": self._call("BUY", "2026-06-10"),
+        }
+        sig = gen._consensus_signal(calls)
+        assert sig == {
+            "direction": "BUY", "agree": 3, "total": 4,
+            "consensus": True, "as_of": "2026-09-01",
+        }
+
+    def test_half_is_not_a_majority(self):
+        calls = {
+            "1y": self._call("BUY", "2026-09-01"),
+            "3y": self._call("BUY", "2026-08-15"),
+            "5y": self._call("SELL", "2026-07-24"),
+            "10y": self._call("SELL", "2026-06-10"),
+        }
+        sig = gen._consensus_signal(calls)
+        assert sig["direction"] is None
+        assert sig["consensus"] is False
+        assert sig["agree"] == 2 and sig["total"] == 4
+
+    def test_winners_without_a_call_abstain_but_count(self):
+        calls = {
+            "1y": self._call("BUY", "2026-09-01"),
+            "3y": {"direction": "HOLD", "strength": 0.0, "as_of": None},
+            "5y": {"direction": "HOLD", "strength": 0.0, "as_of": None},
+            "10y": None,
+        }
+        sig = gen._consensus_signal(calls)
+        assert sig["direction"] is None
+        assert sig["consensus"] is False
+        assert sig["agree"] == 1 and sig["total"] == 3
+
+    def test_no_calls_at_all(self):
+        assert gen._consensus_signal({}) == gen._empty_signal()
+        assert gen._consensus_signal(
+            {"1y": {"direction": "HOLD", "strength": 0.0, "as_of": None}}
+        ) == gen._empty_signal()
+
 
 class TestBuildIntegration:
     @pytest.mark.slow
@@ -135,13 +208,18 @@ class TestBuildIntegration:
 
         assert payload["oos_definition"]
         assert entry["name"]
-        assert entry["signal"]["direction"] in {"BUY", "SELL", "HOLD"}
+        sig = entry["signal"]
+        assert sig["direction"] in {"BUY", "SELL", "HOLD", None}
+        assert sig["total"] >= sig["agree"] >= 0
+        assert sig["consensus"] == (sig["direction"] is not None)
         # every window is present; each either has a winner or is explicitly empty
         for w in gen.WINDOWS:
             cell = entry["windows"][w]
             assert "strategy" in cell
             if cell["strategy"]:
                 assert "win_rate" in cell and "trades_completed" in cell
+                assert "call" in cell
+                assert cell["call"]["direction"] in {"BUY", "SELL", "HOLD"}
 
         # trades file mirrors the signals file, with positional rows
         assert trades_payload["columns"] == gen.TRADE_COLUMNS
@@ -175,6 +253,13 @@ class TestTrades:
         rows = gen._trades({"trades": [self._trade(), self._trade(exit_reason="data_end")]})
         assert len(rows) == 1
 
+    def test_non_finite_cells_become_none(self):
+        rows = gen._trades({"trades": [self._trade(
+            exit_price=float("nan"), pnl=float("nan"), pnl_pct=float("nan"))]})
+        assert rows[0][3] is None   # Exit Price
+        assert rows[0][4] is None   # P&L ($)
+        assert rows[0][5] is None   # P&L (%)
+
     def test_newest_first(self):
         old = self._trade(entry_date=datetime(2023, 1, 3), exit_date=datetime(2023, 2, 1))
         new = self._trade(entry_date=datetime(2024, 1, 2), exit_date=datetime(2024, 1, 20))
@@ -197,9 +282,11 @@ class TestEmptyTradesPayload:
 def _fake_entry(ticker: str) -> dict:
     return {
         "name": f"{ticker} Inc.",
-        "signal": {"direction": "BUY", "strength": 0.5, "as_of": "2026-01-01", "strategy": "MA 50/200"},
+        "signal": {"direction": "BUY", "agree": 1, "total": 1, "consensus": True,
+                   "as_of": "2026-01-01"},
         "windows": {
             "1y": {"strategy": "MA 50/200", "low_confidence": False, "oos": None,
+                   "call": {"direction": "BUY", "strength": 0.5, "as_of": "2026-01-01"},
                    "win_rate": 0.5, "total_pnl": 12.0, "cagr": 0.1, "sharpe": 1.0,
                    "trades_completed": 1},
         },
@@ -220,6 +307,22 @@ class TestBuild:
         assert set(signals["tickers"]) == {"AAPL"}
         assert set(trades["trades"]) == {"AAPL"}
         assert trades["columns"] == gen.TRADE_COLUMNS
+
+
+class TestSafeBuild:
+    def test_failure_is_captured_not_raised(self, monkeypatch):
+        def boom(*a, **k):
+            raise ValueError("kaboom")
+
+        monkeypatch.setattr(gen, "build_ticker", boom)
+        result = gen._safe_build("AAPL", Path("."), False, 3)
+        assert isinstance(result, gen.TickerFailure)
+        assert result.ticker == "AAPL"
+        assert "ValueError: kaboom" in result.error
+
+    def test_success_passes_through(self, monkeypatch):
+        monkeypatch.setattr(gen, "build_ticker", lambda *a, **k: ("entry", {}))
+        assert gen._safe_build("AAPL", Path("."), False, 3) == ("entry", {})
 
 
 class TestMain:
@@ -287,6 +390,22 @@ class TestMain:
         assert json.loads(sig.read_text())["tickers"] == {}
         assert json.loads(trd.read_text())["trades"] == {}
 
+    def test_failed_ticker_exits_nonzero(self, tmp_path, monkeypatch):
+        def boom(ticker, *a, **k):
+            if ticker == "BOOM":
+                raise ValueError("kaboom")
+            return _fake_entry(ticker), _fake_trades()
+
+        monkeypatch.setattr(gen, "build_ticker", boom)
+        sig, trd = tmp_path / "s.json", tmp_path / "t.json"
+        with pytest.raises(SystemExit) as exc:
+            gen.main(["--tickers", "AAPL", "BOOM", "--output", str(sig),
+                      "--trades-output", str(trd), "--skip-oos"])
+        assert exc.value.code == 1
+        # the good ticker is still written (resumable), but the non-zero exit
+        # signals that the universe is incomplete and must not be published
+        assert set(json.loads(sig.read_text())["tickers"]) == {"AAPL"}
+
     def test_workers_writes_all_in_request_order(self, tmp_path, stub, monkeypatch):
         # Run the parallel path in-process (threads) so the stubbed engine is visible.
         monkeypatch.setattr(gen, "_pool_factory", ThreadPoolExecutor)
@@ -327,5 +446,6 @@ class TestProcessAll:
         seen = {}
         gen._process_all(["AAPL", "BAD", "KO"], Path("."), False, 3, 1,
                          lambda t, r: seen.__setitem__(t, r))
-        assert seen["BAD"] is None
+        assert isinstance(seen["BAD"], gen.TickerFailure)
+        assert seen["BAD"].ticker == "BAD"
         assert seen["AAPL"] is not None and seen["KO"] is not None
