@@ -201,6 +201,35 @@ class TestDataFeedGetBarsForDate:
         assert bars[0].ticker == "AAPL"
 
 
+class TestDataFeedIterBarsByDate:
+    def test_matches_get_bars_for_date(self, tmp_path, sample_ohlcv):
+        _write_parquet(tmp_path, "AAPL", sample_ohlcv)
+        _write_parquet(tmp_path, "MSFT", sample_ohlcv)
+
+        feed = DataFeed(tmp_path)
+        grouped = list(feed.iter_bars_by_date())
+
+        assert [d for d, _ in grouped] == feed.dates
+        for date, bars in grouped:
+            assert bars == feed.get_bars_for_date(date)
+
+    def test_groups_multi_ticker_by_date_in_ticker_order(self, tmp_path, sample_ohlcv):
+        _write_parquet(tmp_path, "AAPL", sample_ohlcv)
+        _write_parquet(tmp_path, "MSFT", sample_ohlcv)
+
+        feed = DataFeed(tmp_path)
+        grouped = list(feed.iter_bars_by_date())
+
+        assert len(grouped) == 5
+        for _, bars in grouped:
+            assert [b.ticker for b in bars] == ["AAPL", "MSFT"]
+
+    def test_empty_feed_yields_nothing(self, tmp_path):
+        feed = DataFeed(tmp_path)
+
+        assert list(feed.iter_bars_by_date()) == []
+
+
 class TestDataFeedGetTickerHistory:
     def test_returns_dataframe(self, tmp_path, sample_ohlcv):
         _write_parquet(tmp_path, "AAPL", sample_ohlcv)

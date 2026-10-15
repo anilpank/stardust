@@ -33,8 +33,7 @@ class DataEngine:
         """
         self._signals = []
 
-        for date in self.feed.dates:
-            bars = self.feed.get_bars_for_date(date)
+        for _date, bars in self.feed.iter_bars_by_date():
             for bar in bars:
                 event = MarketEvent(
                     timestamp=bar.date,

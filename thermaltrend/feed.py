@@ -189,6 +189,48 @@ class DataFeed:
             for ticker, row in date_bars.iterrows()
         ]
 
+    def iter_bars_by_date(self):
+        """Yield ``(date, [Bar, ...])`` in chronological order.
+
+        Equivalent to calling :meth:`get_bars_for_date` for every date in
+        :attr:`dates`, but streams the (already date-sorted) frame once instead
+        of doing a MultiIndex lookup per date — that lookup dominates backtest
+        runtime. Within a date, bars come in ticker order.
+        """
+        data = self._data
+        if data.empty:
+            return
+        dates = data.index.get_level_values("date")
+        tickers = data.index.get_level_values("ticker").to_numpy()
+        open_ = data["Open"].to_numpy()
+        high = data["High"].to_numpy()
+        low = data["Low"].to_numpy()
+        close = data["Close"].to_numpy()
+        volume = data["Volume"].to_numpy()
+
+        current = None
+        batch: list[Bar] = []
+        for i in range(len(data)):
+            date = dates[i]
+            if current is None or date != current:
+                if batch:
+                    yield current, batch
+                batch = []
+                current = date
+            batch.append(
+                Bar(
+                    ticker=tickers[i],
+                    date=date.to_pydatetime(),
+                    open=open_[i],
+                    high=high[i],
+                    low=low[i],
+                    close=close[i],
+                    volume=int(volume[i]),
+                )
+            )
+        if batch:
+            yield current, batch
+
     def get_ticker_history(self, ticker: str) -> pd.DataFrame:
         try:
             return self._data.xs(ticker, level="ticker")
