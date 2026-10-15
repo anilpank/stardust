@@ -106,7 +106,10 @@
       <div class="demo" id="demo">
         <div class="demo-head">
           <h3>Live prototype</h3>
-          <span class="badge-stage">Illustrative data — prototype, not live advice</span>
+          <div class="demo-meta">
+            <span class="badge-asof" id="demo-asof" hidden></span>
+            <span class="badge-stage">Illustrative data — prototype, not live advice</span>
+          </div>
         </div>
         <form class="demo-form" id="demo-form">
           <label class="visually-hidden" for="demo-ticker">Ticker</label>
@@ -127,6 +130,11 @@
           <p class="muted">Enter a ticker or tap a quick pick to see the strategy fit.</p>
         </div>
       </div>
+
+      <details class="glossary" id="glossary">
+        <summary>New here? What the strategies and the honesty badge mean</summary>
+        <div class="glossary-body" id="glossary-body"></div>
+      </details>
     </div>
   </section>
 

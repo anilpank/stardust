@@ -181,6 +181,11 @@ class TestDemoEndpoint:
         assert body["data"]["name"] == "Apple Inc."
         assert "AAPL" in body["known"]
 
+    def test_exposes_analysis_date_and_oos_definition(self, client, demo_file):
+        body = client.get("/api/demo?ticker=AAPL").get_json()
+        assert body["generated_at"] == "2026-01-01T00:00:00+00:00"
+        assert body["oos_definition"] == "holdout"
+
     def test_unknown_ticker(self, client, demo_file):
         body = client.get("/api/demo?ticker=ZZZZ").get_json()
         assert body["available"] is False
@@ -190,6 +195,48 @@ class TestDemoEndpoint:
         monkeypatch.setattr(server, "DEMO_JSON", tmp_path / "missing.json")
         body = client.get("/api/demo?ticker=AAPL").get_json()
         assert body["available"] is False
+
+
+class TestTradesEndpoint:
+    COLUMNS = ["Entry Date", "Entry Price", "Exit Date", "Exit Price",
+               "P&L ($)", "P&L (%)", "Holding (days)", "Exit Reason"]
+
+    @pytest.fixture
+    def trades_file(self, tmp_path, monkeypatch):
+        path = tmp_path / "demo_trades.json"
+        path.write_text(json.dumps({
+            "generated_at": "2026-01-01T00:00:00+00:00",
+            "columns": self.COLUMNS,
+            "trades": {"AAPL": {"1y": [["2024-01-02", 100.0, "2024-01-20", 110.0,
+                                       1000.0, 10.0, 18, "signal"]]}},
+        }))
+        monkeypatch.setattr(server, "TRADES_JSON", path)
+        monkeypatch.setattr(server, "_trades_cache", {"mtime": None, "payload": None})
+        return path
+
+    def test_known_ticker(self, client, trades_file):
+        body = client.get("/api/trades?ticker=aapl").get_json()
+        assert body["available"] is True
+        assert body["ticker"] == "AAPL"
+        assert body["columns"] == self.COLUMNS
+        assert body["windows"]["1y"][0][0] == "2024-01-02"
+
+    def test_unknown_ticker(self, client, trades_file):
+        body = client.get("/api/trades?ticker=ZZZZ").get_json()
+        assert body["available"] is False
+        assert body["windows"] == {}
+
+    def test_missing_file(self, client, tmp_path, monkeypatch):
+        monkeypatch.setattr(server, "TRADES_JSON", tmp_path / "missing.json")
+        monkeypatch.setattr(server, "_trades_cache", {"mtime": None, "payload": None})
+        body = client.get("/api/trades?ticker=AAPL").get_json()
+        assert body["available"] is False
+
+    def test_result_cached_between_requests(self, client, trades_file):
+        client.get("/api/trades?ticker=AAPL")
+        cached = server._trades_cache["payload"]
+        client.get("/api/trades?ticker=AAPL")
+        assert server._trades_cache["payload"] is cached  # parsed once, not re-read
 
 
 class TestSignup:

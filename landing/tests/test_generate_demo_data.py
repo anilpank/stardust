@@ -14,6 +14,7 @@ import pandas as pd
 import pytest
 
 from landing import generate_demo_data as gen
+from thermaltrend.analytics.trade_simulator import Trade
 from thermaltrend.core.events import SignalDirection, SignalEvent
 
 REAL_DATA_DIR = gen.DEFAULT_DATA_DIR
@@ -125,7 +126,7 @@ class TestBuildIntegration:
         if not (REAL_DATA_DIR / "AAPL.parquet").exists():
             pytest.skip("AAPL Parquet data not available")
 
-        payload = gen.build(["AAPL"], REAL_DATA_DIR, skip_oos=True, min_trades=3)
+        payload, trades_payload = gen.build(["AAPL"], REAL_DATA_DIR, skip_oos=True, min_trades=3)
         entry = payload["tickers"]["AAPL"]
 
         assert payload["oos_definition"]
@@ -137,3 +138,45 @@ class TestBuildIntegration:
             assert "strategy" in cell
             if cell["strategy"]:
                 assert "win_rate" in cell and "trades_completed" in cell
+
+        # trades file mirrors the signals file, with positional rows
+        assert trades_payload["columns"] == gen.TRADE_COLUMNS
+        assert "AAPL" in trades_payload["trades"]
+        for rows in trades_payload["trades"]["AAPL"].values():
+            assert rows
+            assert all(len(row) == len(gen.TRADE_COLUMNS) for row in rows)
+
+
+class TestTrades:
+    def _trade(self, **overrides):
+        base = dict(
+            ticker="AAPL", entry_date=datetime(2024, 1, 2), entry_price=100.0,
+            exit_date=datetime(2024, 1, 20), exit_price=110.0,
+            direction=SignalDirection.BUY, pnl=1000.0, pnl_pct=0.10,
+            holding_days=18, exit_reason="signal", strategy_id="test",
+        )
+        base.update(overrides)
+        return Trade(**base)
+
+    def test_row_shape_matches_columns(self):
+        rows = gen._trades({"trades": [self._trade()]})
+        assert len(rows) == 1
+        assert len(rows[0]) == len(gen.TRADE_COLUMNS)
+        assert rows[0][0] == "2024-01-02"   # Entry Date
+        assert rows[0][1] == 100.0          # Entry Price
+        assert rows[0][4] == 1000.0         # P&L ($)
+        assert rows[0][7] == "signal"       # Exit Reason
+
+    def test_excludes_open_data_end_trades(self):
+        rows = gen._trades({"trades": [self._trade(), self._trade(exit_reason="data_end")]})
+        assert len(rows) == 1
+
+    def test_newest_first(self):
+        old = self._trade(entry_date=datetime(2023, 1, 3), exit_date=datetime(2023, 2, 1))
+        new = self._trade(entry_date=datetime(2024, 1, 2), exit_date=datetime(2024, 1, 20))
+        rows = gen._trades({"trades": [old, new]})
+        assert [r[0] for r in rows] == ["2024-01-02", "2023-01-03"]
+
+    def test_empty_inputs(self):
+        assert gen._trades({}) == []
+        assert gen._trades({"trades": []}) == []

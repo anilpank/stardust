@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-10-11T17:48:18+00:00",
+  "generated_at": "2026-10-15T10:38:19+00:00",
   "oos_definition": "winner re-scored on the most recent 30% of each window (holdout); flagged overfit if the holdout return is negative or win rate < 50%",
   "windows": [
     "1y",

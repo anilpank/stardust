@@ -7,6 +7,8 @@ actually measures:
   (the primary conversion event).
 * ``POST /api/track``  — a funnel/behaviour event (visit, ticker_lookup,
   signal_view, cta_click, return_visit, willingness-to-pay clicks...).
+* ``GET  /api/trades`` — the pre-generated trade-by-trade detail behind a
+  window's winning strategy (read from ``demo_trades.json``, cached in memory).
 
 Both are written to a single SQLite database (``landing.db``) under
 ``LANDING_DATA_DIR`` — the only "backend" a short experiment needs. The admin
@@ -47,6 +49,7 @@ DB_PATH = DATA_DIR / "landing.db"
 SIGNUPS_CSV = DATA_DIR / "signups.csv"
 EVENTS_CSV = DATA_DIR / "events.csv"
 DEMO_JSON = BASE_DIR / "demo_signals.json"
+TRADES_JSON = BASE_DIR / "demo_trades.json"
 
 # HTTP Basic auth for the /admin console. Set a password before deploying:
 #     ADMIN_PASSWORD=...         (local dev; plaintext)
@@ -106,6 +109,8 @@ _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 _TICKER_RE = re.compile(r"^[A-Z.\-]{1,6}$")
 _init_lock = threading.Lock()
 _initialized: set[str] = set()
+_trades_lock = threading.Lock()
+_trades_cache: dict = {"mtime": None, "payload": None}
 _auth_lock = threading.Lock()
 _auth_failures: dict[str, list[float]] = {}
 
@@ -289,6 +294,44 @@ def demo():
             "oos_definition": payload.get("oos_definition"),
             "data": tickers.get(ticker),
             "known": sorted(tickers.keys()),
+        }
+    )
+
+
+def _load_trades() -> dict | None:
+    """Parse demo_trades.json once and cache it until the file changes."""
+    if not TRADES_JSON.exists():
+        return None
+    try:
+        mtime = TRADES_JSON.stat().st_mtime
+    except OSError:
+        return None
+    with _trades_lock:
+        if _trades_cache["mtime"] == mtime and _trades_cache["payload"] is not None:
+            return _trades_cache["payload"]
+        try:
+            payload = json.loads(TRADES_JSON.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return None
+        _trades_cache.update(mtime=mtime, payload=payload)
+        return payload
+
+
+@app.get("/api/trades")
+def trades():
+    """Trade-level drill-down for one ticker (pre-generated, cached in memory)."""
+    ticker = request.args.get("ticker", "").strip().upper()
+    payload = _load_trades()
+    if payload is None:
+        return jsonify({"available": False, "ticker": ticker, "columns": [], "windows": {}})
+    entries = payload.get("trades", {})
+    return jsonify(
+        {
+            "available": ticker in entries,
+            "ticker": ticker,
+            "generated_at": payload.get("generated_at"),
+            "columns": payload.get("columns", []),
+            "windows": entries.get(ticker, {}),
         }
     )
 
