@@ -100,10 +100,11 @@ Run these **from the repo root** on a machine with the full repo + Parquet data
 python landing/generate_ticker_index.py
 
 # 2. Signals + trades for the whole S&P 500. Writes demo_signals.json and
-#    demo_trades.json, checkpointing after every ticker (--resume continues an
-#    interrupted run). --workers parallelises across tickers: ~25 min sequential
-#    drops to a few minutes on 4-8 cores (output is byte-identical either way).
-python landing/generate_demo_data.py --resume --workers 8 \
+#    demo_trades.json, checkpointing after every ticker. This is a FULL refresh,
+#    so omit --resume (with it, an already-complete file is a silent no-op).
+#    --workers parallelises across tickers: ~25 min sequential → ~2 min on 8
+#    cores (output is byte-identical either way).
+python landing/generate_demo_data.py --workers 8 \
   --tickers $(python -c "import json;print(' '.join(e['ticker'] for e in json.load(open('landing/tickers.json'))['tickers']))")
 ```
 
