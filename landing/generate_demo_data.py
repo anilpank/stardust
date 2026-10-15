@@ -27,6 +27,7 @@ from thermaltrend.company_universe import (
     analyze_company,
     company_summary_frame,
     recommend_strategy,
+    trades_to_frame,
 )
 from thermaltrend.ticker_search import company_name
 
@@ -36,6 +37,12 @@ WINDOWS = {"1y": 1, "3y": 3, "5y": 5, "10y": 10}
 OOS_DEFINITION = "winner re-scored on the most recent 30% of each window (holdout); " \
                  "flagged overfit if the holdout return is negative or win rate < 50%"
 OOS_HELDOUT_FRACTION = 0.30
+# Trade rows are stored as positional arrays (one entry per column) so the
+# committed JSON stays compact; the landing page maps them back by name.
+TRADE_COLUMNS = [
+    "Entry Date", "Entry Price", "Exit Date", "Exit Price",
+    "P&L ($)", "P&L (%)", "Holding (days)", "Exit Reason",
+]
 
 
 def _latest_date(ticker: str, data_dir: Path) -> pd.Timestamp | None:
@@ -104,8 +111,30 @@ def _empty_payload() -> dict:
     }
 
 
-def build_ticker(ticker: str, data_dir: Path, skip_oos: bool, min_trades: int) -> dict | None:
-    """Compute one ticker's entry, or ``None`` when it has no price data."""
+def _empty_trades_payload() -> dict:
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "columns": TRADE_COLUMNS,
+        "trades": {},
+    }
+
+
+def _trades(result: dict) -> list[list]:
+    """Completed trades for one strategy as positional rows (see TRADE_COLUMNS), newest first."""
+    frame = trades_to_frame(result.get("trades") or [])
+    if frame.empty:
+        return []
+    records = sorted(frame.to_dict("records"), key=lambda r: r["Entry Date"], reverse=True)
+    return [[rec[col] for col in TRADE_COLUMNS] for rec in records]
+
+
+def build_ticker(ticker: str, data_dir: Path, skip_oos: bool, min_trades: int
+                 ) -> tuple[dict, dict] | None:
+    """Compute one ticker's entry and its per-window trades.
+
+    Returns ``(entry, trades)`` where ``trades`` maps a window label to the
+    winner strategy's completed trades, or ``None`` when there is no price data.
+    """
     end = _latest_date(ticker, data_dir)
     if end is None:
         print(f"  ! {ticker}: no price data, skipping")
@@ -116,6 +145,7 @@ def build_ticker(ticker: str, data_dir: Path, skip_oos: bool, min_trades: int) -
         "signal": {"direction": "HOLD", "strength": 0.0, "as_of": None, "strategy": None},
         "windows": {},
     }
+    trades: dict[str, list] = {}
     print(f"  {ticker} ({entry['name']}) — data through {end.date()}")
 
     for wlabel, years in WINDOWS.items():
@@ -137,6 +167,9 @@ def build_ticker(ticker: str, data_dir: Path, skip_oos: bool, min_trades: int) -
         }
         cell.update(_metrics(win_result))
         entry["windows"][wlabel] = cell
+        rows = _trades(win_result)
+        if rows:
+            trades[wlabel] = rows
 
         if wlabel == "1y":  # shortest window drives the "current" signal
             entry["signal"] = _latest_signal(win_result)
@@ -151,24 +184,32 @@ def build_ticker(ticker: str, data_dir: Path, skip_oos: bool, min_trades: int) -
             if ho_metrics["trades_completed"] >= 2:
                 cell["oos"] = bool(ho_metrics["total_pnl"] >= 0 and ho_metrics["win_rate"] >= 0.5)
 
-    return entry
+    return entry, trades
 
 
-def build(tickers: list[str], data_dir: Path, skip_oos: bool, min_trades: int) -> dict:
+def build(tickers: list[str], data_dir: Path, skip_oos: bool, min_trades: int
+          ) -> tuple[dict, dict]:
     generated = _empty_payload()
+    trades_payload = _empty_trades_payload()
     for ticker in tickers:
-        entry = build_ticker(ticker, data_dir, skip_oos, min_trades)
-        if entry is not None:
-            generated["tickers"][ticker] = entry
-    return generated
+        result = build_ticker(ticker, data_dir, skip_oos, min_trades)
+        if result is None:
+            continue
+        entry, trades = result
+        generated["tickers"][ticker] = entry
+        trades_payload["trades"][ticker] = trades
+    return generated, trades_payload
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Generate landing-page demo signals.")
     parser.add_argument("--tickers", nargs="+", default=DEFAULT_TICKERS)
     parser.add_argument("--output", default=str(BASE_DIR / "demo_signals.json"))
+    parser.add_argument("--trades-output", default=str(BASE_DIR / "demo_trades.json"))
     parser.add_argument("--data-dir", default=str(DEFAULT_DATA_DIR))
     parser.add_argument("--skip-oos", action="store_true", help="Skip the out-of-sample holdout check")
+    parser.add_argument("--skip-trades", action="store_true",
+                        help="Only write signals, not the trade-level detail file")
     parser.add_argument("--min-trades", type=int, default=3)
     parser.add_argument("--resume", action="store_true",
                         help="Keep tickers already in --output and compute only the rest")
@@ -176,6 +217,7 @@ def main() -> None:
 
     data_dir = Path(args.data_dir)
     out = Path(args.output)
+    trades_out = Path(args.trades_output)
 
     if args.resume and out.exists():
         payload = json.loads(out.read_text(encoding="utf-8"))
@@ -184,19 +226,35 @@ def main() -> None:
     else:
         payload = _empty_payload()
 
+    if not args.skip_trades and args.resume and trades_out.exists():
+        trades_payload = json.loads(trades_out.read_text(encoding="utf-8"))
+        trades_payload.setdefault("trades", {})
+        trades_payload.setdefault("columns", TRADE_COLUMNS)
+    else:
+        trades_payload = _empty_trades_payload()
+
     print(f"Generating demo data for: {', '.join(args.tickers)}")
     for i, ticker in enumerate(args.tickers, 1):
         if args.resume and ticker in payload["tickers"]:
             continue
-        entry = build_ticker(ticker, data_dir, args.skip_oos, args.min_trades)
-        if entry is not None:
+        result = build_ticker(ticker, data_dir, args.skip_oos, args.min_trades)
+        if result is not None:
+            entry, trades = result
             payload["tickers"][ticker] = entry
+            if not args.skip_trades:
+                trades_payload["trades"][ticker] = trades
         # Checkpoint after every ticker so a long full-universe run is resumable.
-        payload["generated_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        stamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        payload["generated_at"] = stamp
         out.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        if not args.skip_trades:
+            trades_payload["generated_at"] = stamp
+            trades_out.write_text(json.dumps(trades_payload, separators=(",", ":")), encoding="utf-8")
         print(f"    [{i}/{len(args.tickers)}] {len(payload['tickers'])} tickers written")
 
     print(f"\nWrote {out}  ({len(payload['tickers'])} tickers)")
+    if not args.skip_trades:
+        print(f"Wrote {trades_out}  ({len(trades_payload['trades'])} tickers)")
 
 
 if __name__ == "__main__":

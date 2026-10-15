@@ -42,10 +42,11 @@ That's it — the first pulls the latest code, the second updates the app, resta
 | `styles.css` | Styling (dark fintech theme, responsive). |
 | `app.js` | Ticker lookup, matrix rendering, funnel tracking, signup. |
 | `admin.html` / `admin.js` / `admin.css` | Read-only console: KPIs, funnel, leads, events. |
-| `server.py` | Flask app: serves the page + `/api/signup`, `/api/track`, `/api/demo`, `/admin`. |
+| `server.py` | Flask app: serves the page + `/api/signup`, `/api/track`, `/api/demo`, `/api/trades`, `/admin`. |
 | `gen_admin_password.py` | Generates an `ADMIN_PASS_HASH` (`salt:hash`) for admin Basic auth. |
-| `generate_demo_data.py` | Runs the real engine → writes `demo_signals.json`. |
+| `generate_demo_data.py` | Runs the real engine → writes `demo_signals.json` + `demo_trades.json`. |
 | `demo_signals.json` | Pre-computed winning strategy per ticker × timeframe + OOS badge. |
+| `demo_trades.json` | Pre-computed actual trades per ticker × timeframe (powers the drill-down). |
 | `generate_ticker_index.py` | Builds `tickers.json` (ticker → company name) from the membership table. |
 | `tickers.json` | Offline name index so visitors can search by company name. |
 | `requirements.txt`, `Dockerfile` | Deployment. |
@@ -72,29 +73,35 @@ data. To (re)generate them, see **Updating the demo data** below.
 
 ## Updating the demo data
 
-The page serves two committed JSON files. Both are produced **offline** by
+The page serves three committed JSON files. All are produced **offline** by
 scripts — the server never runs the engine, it only reads the JSON:
 
 | File | What it is | Regenerate with |
 |------|------------|-----------------|
 | `demo_signals.json` | Winning strategy per ticker × timeframe, OOS badge, current signal | `generate_demo_data.py` |
+| `demo_trades.json` | Actual completed trades behind each winning strategy (drill-down) | `generate_demo_data.py` |
 | `tickers.json` | ticker → company name, powers company-name search | `generate_ticker_index.py` |
+
+`generate_demo_data.py` writes `demo_signals.json` **and** `demo_trades.json` in
+one pass (pass `--skip-trades` to skip the latter, or `--trades-output PATH` to
+redirect it).
 
 **When to update:** after refreshing price data (`thermaltrend/download_data.py`
 or `thermaltrend/update_data.py`), after S&P 500 membership changes, or before a
-(re)launch so the signals and names are current. Both files are committed, so a
-refresh is just: regenerate → commit → redeploy. `demo_signals.json` records its
+(re)launch so the signals and names are current. All three files are committed, so
+a refresh is just: regenerate → commit → redeploy. `demo_signals.json` records its
 own `generated_at`, and every current signal carries an `as_of` date.
 
-Run both **from the repo root** on a machine with the full repo + Parquet data
+Run these **from the repo root** on a machine with the full repo + Parquet data
 (the generators import `thermaltrend`):
 
 ```bash
 # 1. Company-name index (fast). From the current S&P 500 membership table.
 python landing/generate_ticker_index.py
 
-# 2. Signals for the whole S&P 500. Long-running (~3s/ticker, ~25-30 min).
-#    Checkpoints after every ticker and --resume continues an interrupted run.
+# 2. Signals + trades for the whole S&P 500. Long-running (~25-30 min).
+#    Writes demo_signals.json and demo_trades.json. Checkpoints after every
+#    ticker and --resume continues an interrupted run.
 python landing/generate_demo_data.py --resume \
   --tickers $(python -c "import json;print(' '.join(e['ticker'] for e in json.load(open('landing/tickers.json'))['tickers']))")
 ```
@@ -103,16 +110,23 @@ Useful flags for `generate_demo_data.py`:
 
 - `--tickers AAPL NVDA KO` — a subset instead of the whole index.
 - `--skip-oos` — skip the out-of-sample holdout (much faster; drops the honesty badge).
+- `--skip-trades` / `--trades-output PATH` — skip or redirect `demo_trades.json`.
 - `--min-trades N` — minimum trades for a strategy to be recommended (default 3).
 - `--resume` — keep tickers already in `--output`; **omit it to overwrite** the
-  file with a fresh run (e.g. when you only want a specific subset).
+  file with a fresh run (e.g. when you only want a specific subset). Note that
+  `--resume` also skips already-present tickers for the trades file, so omit it
+  when back-filling trades for a file generated before `demo_trades.json` existed.
 
-Then commit `landing/demo_signals.json` and `landing/tickers.json` and redeploy
-(the Docker image bakes them in — see `Dockerfile`).
+Then commit `landing/demo_signals.json`, `landing/demo_trades.json` and
+`landing/tickers.json` and redeploy (the Docker image bakes them in — see
+`Dockerfile`).
 
 > A ticker missing from `demo_signals.json` (or without price data) is not a dead
 > end: the page shows the "we don't have a cached report" message and still
 > captures the visitor's email, so unknown tickers don't need any configuration.
+> Likewise, a ticker present in `demo_signals.json` but absent from
+> `demo_trades.json` still shows its metrics — it just can't expand into the
+> trade-by-trade table.
 
 ---
 
@@ -324,8 +338,8 @@ Everything lives in a single SQLite database — `landing.db` under
 **`events`** — the funnel
 `id, timestamp, event, ticker, source, visitor_id, is_return, path, referrer, meta`
 
-Events: `visit`, `return_visit`, `ticker_lookup`, `signal_view`, `cta_click`,
-`email_submit`, `signal_unlock`, `wtp_yes` / `wtp_maybe` / `wtp_no`.
+Events: `visit`, `return_visit`, `ticker_lookup`, `signal_view`, `window_detail`,
+`cta_click`, `email_submit`, `signal_unlock`, `wtp_yes` / `wtp_maybe` / `wtp_no`.
 
 The DB is created automatically on first request (schema in `server.py`); no
 migration step and no external service. Any pre-SQLite `signups.csv` /
@@ -336,7 +350,15 @@ source of truth.
 ### The signal gate (free history vs email-gated live call)
 
 The demo shows the **full historical strategy fit** (1/3/5/10y + OOS badge) for
-every ticker, to anyone — that's the trust engine. The **live buy/sell call**
+every ticker, to anyone — that's the trust engine. Each window card is a button:
+click it to drill into the raw metrics behind the winner (win rate, total P&L,
+CAGR, Sharpe, trades) **and the actual completed trades** (entry/exit, P&L, exit
+reason) served lazily from `/api/trades`; expanding emits a `window_detail` event.
+Each card also explains, in plain English, what the winning strategy *is* and what
+its honesty badge means — and a collapsible glossary under the demo covers all six
+strategies and both badge states. The result also shows the **analysis date**
+(`generated_at`), and the demo header shows it up front from the preloaded
+`/api/demo` response. The **live buy/sell call**
 (the one actionable thing) is gated behind an email: `renderResult()` in
 `app.js` renders a locked pill (`🔒 Live signal — unlock by email`) until signup.
 On a successful `/api/signup`, the client unlocks it, emits a `signal_unlock`

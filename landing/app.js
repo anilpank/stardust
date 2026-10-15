@@ -94,6 +94,25 @@
     });
   }
   function fmtPct(v) { return (v == null || isNaN(v)) ? "—" : (v * 100).toFixed(0) + "%"; }
+  function fmtSignedPct(v) {
+    if (v == null || isNaN(v)) return "—";
+    var p = Number(v) * 100;
+    return (p > 0 ? "+" : "") + p.toFixed(1) + "%";
+  }
+  function fmtNum(v, dp) {
+    return (v == null || isNaN(v)) ? "—" : Number(v).toFixed(dp == null ? 2 : dp);
+  }
+  function fmtMoney(v) {
+    if (v == null || isNaN(v)) return "—";
+    var n = Number(v);
+    return (n < 0 ? "-$" : "$") + Math.abs(n).toLocaleString([], { maximumFractionDigits: 0 });
+  }
+  function fmtDate(iso) {
+    if (!iso) return "";
+    var d = new Date(iso);
+    if (isNaN(d.getTime())) return "";
+    return d.toLocaleDateString([], { year: "numeric", month: "short", day: "numeric" });
+  }
   function debounce(fn, wait) {
     var t;
     return function () {
@@ -104,6 +123,68 @@
   }
 
   var WINDOW_LABELS = { "1y": "1 year", "3y": "3 years", "5y": "5 years", "10y": "10 years" };
+
+  /* ---------- plain-English explanations (strategy + honesty badge) ---------- */
+  var STRATEGY_INFO = {
+    "MA 50/200": {
+      kind: "Trend-following",
+      blurb: "Buys when the 50-day moving average crosses above the 200-day one (a " +
+        "“golden cross”) and sells on the reverse (“death cross”) — the textbook " +
+        "long-term trend rule.",
+    },
+    "Donchian 20/10": {
+      kind: "Breakout",
+      blurb: "Buys when price breaks out to a new 20-day high and exits when it " +
+        "falls to a 10-day low. It’s the classic trading-channel breakout, made " +
+        "famous by the original Turtles.",
+    },
+    "RSI 14": {
+      kind: "Mean-reversion",
+      blurb: "Buys when the 14-day RSI climbs back up out of oversold territory " +
+        "(below 30) and sells when it drops back from overbought (above 70). It " +
+        "bets that sharp moves snap back.",
+    },
+    "ATR Trail 20/14/3": {
+      kind: "Volatility stop",
+      blurb: "Enters on a 20-day breakout, then rides the move with a trailing stop " +
+        "3× ATR(14) below the highest high since entry. The stop only ratchets up, " +
+        "so it protects gains as the trend runs.",
+    },
+    "Dual Mom 126d": {
+      kind: "Dual momentum",
+      blurb: "Buys when the stock’s 6-month (126-day) return is positive AND better " +
+        "than the S&P 500’s; sells when either condition fails. It combines absolute " +
+        "and relative momentum.",
+    },
+    "Factor 126d": {
+      kind: "Factor scoring",
+      blurb: "Blends momentum, low volatility, trend and short-term reversal into a " +
+        "single 0–1 score, and holds while the score is strong and improving — a " +
+        "rules-based multi-factor model.",
+    },
+  };
+  var OOS_INFO = {
+    "true": {
+      label: "Held up out-of-sample",
+      tone: "good",
+      blurb: "The winning strategy was re-tested on a slice of recent data it was " +
+        "never tuned on — and it still made money with a ≥50% win rate. That’s the " +
+        "good sign: the edge looks real, not just curve-fit to the past.",
+    },
+    "false": {
+      label: "Likely overfit",
+      tone: "bad",
+      blurb: "On held-out data the strategy’s edge disappeared (a negative return or " +
+        "a <50% win rate). That’s the classic warning sign: great in the backtest, " +
+        "unreliable in live trading, because it was tuned to the past.",
+    },
+    "null": {
+      label: "Out-of-sample check unavailable",
+      tone: "",
+      blurb: "There wasn’t enough recent data to re-test this window, so no " +
+        "out-of-sample judgement is made either way.",
+    },
+  };
 
   /* ---------- company-name search (offline ticker index) ----------
    * /tickers.json is a tiny ticker -> company-name index generated from the
@@ -246,6 +327,7 @@
 
   /* ---------- interactive prototype ---------- */
   var demoResult = $("#demo-result");
+  var demoAsof = document.getElementById("demo-asof");
   var demoKnown = [];
   var lastTicker = "";      // last ticker looked up in the demo
   var pendingTicker = "";   // ticker a visitor tried to unlock
@@ -262,8 +344,123 @@
     try { localStorage.setItem("sd_unlocked", "1"); } catch (e) {}
   }
 
+  function setAnalysisDate(iso) {
+    if (!demoAsof) return;
+    var d = fmtDate(iso);
+    if (!d) { demoAsof.hidden = true; return; }
+    demoAsof.textContent = "Analysis updated " + d;
+    demoAsof.hidden = false;
+  }
+
+  /* ---------- trade-level drill-down (pre-generated, fetched lazily) ---------- */
+  var TRADE_COLUMNS = ["Entry Date", "Entry Price", "Exit Date", "Exit Price",
+    "P&L ($)", "P&L (%)", "Holding (days)", "Exit Reason"];
+  var TRADE_VIEW = [
+    ["Entry Date", "Entry"], ["Exit Date", "Exit"], ["P&L ($)", "P&L ($)"],
+    ["P&L (%)", "P&L (%)"], ["Holding (days)", "Days"], ["Exit Reason", "Exit reason"],
+  ];
+  var tradesCache = {};  // ticker -> { columns, windows } | null
+
+  function loadTrades(ticker, cb) {
+    if (tradesCache[ticker] !== undefined) { cb(tradesCache[ticker]); return; }
+    fetch("/api/trades?ticker=" + encodeURIComponent(ticker))
+      .then(function (r) { return r.json(); })
+      .then(function (j) {
+        tradesCache[ticker] = j && j.available
+          ? { windows: j.windows || {}, columns: (j.columns && j.columns.length) ? j.columns : TRADE_COLUMNS }
+          : null;
+        cb(tradesCache[ticker]);
+      })
+      .catch(function () { tradesCache[ticker] = null; cb(null); });
+  }
+
+  function renderTrades(box, rows, columns) {
+    if (!rows || !rows.length) {
+      box.innerHTML = '<p class="note muted">Trade-by-trade detail isn’t available for this window yet.</p>';
+      return;
+    }
+    var idx = {};
+    columns.forEach(function (c, i) { idx[c] = i; });
+    function at(rec, name) { var i = idx[name]; return i == null ? "" : rec[i]; }
+
+    var head = "<tr>" + TRADE_VIEW.map(function (v) {
+      var num = v[0] === "P&L ($)" || v[0] === "P&L (%)" || v[0] === "Holding (days)";
+      return '<th' + (num ? ' class="num"' : "") + ">" + esc(v[1]) + "</th>";
+    }).join("") + "</tr>";
+
+    var body = rows.map(function (rec) {
+      var pnl = Number(at(rec, "P&L ($)"));
+      var pnlPct = Number(at(rec, "P&L (%)"));
+      var cls = pnl >= 0 ? "pos" : "neg";
+      return "<tr>" +
+        "<td>" + esc(at(rec, "Entry Date")) + "</td>" +
+        "<td>" + esc(at(rec, "Exit Date")) + "</td>" +
+        '<td class="num ' + cls + '">' + (pnl >= 0 ? "+" : "") + fmtMoney(pnl) + "</td>" +
+        '<td class="num ' + cls + '">' + (pnlPct >= 0 ? "+" : "") + pnlPct.toFixed(1) + "%</td>" +
+        '<td class="num">' + esc(at(rec, "Holding (days)")) + "</td>" +
+        "<td>" + esc(at(rec, "Exit Reason")) + "</td>" +
+        "</tr>";
+    }).join("");
+
+    box.innerHTML =
+      '<div class="trades-head">Actual trades <span class="muted">(' + rows.length +
+      " completed)</span></div>" +
+      '<div class="trades-scroll"><table class="trades"><thead>' + head +
+      "</thead><tbody>" + body + "</tbody></table></div>";
+  }
+
+  function winCard(wlabel, c) {
+    var label = WINDOW_LABELS[wlabel] || wlabel;
+    if (!c || !c.strategy) {
+      return '<div class="win-card"><div class="win-win">' + esc(label) +
+             '</div><div class="win-name muted">—</div></div>';
+    }
+    var info = STRATEGY_INFO[c.strategy];
+    var oosInfo = OOS_INFO[String(c.oos)] || OOS_INFO["null"];
+    var oos = "";
+    if (c.oos === true) oos = '<span class="oos oos-true" title="' + esc(oosInfo.blurb) + '">✓ Held up out-of-sample</span>';
+    else if (c.oos === false) oos = '<span class="oos oos-false" title="' + esc(oosInfo.blurb) + '">⚠ Likely overfit</span>';
+
+    var stats = [
+      ["Win rate", fmtPct(c.win_rate)],
+      ["Total P&amp;L", fmtMoney(c.total_pnl)],
+      ["CAGR", fmtSignedPct(c.cagr)],
+      ["Sharpe", fmtNum(c.sharpe)],
+      ["Trades", c.trades_completed == null ? "—" : String(c.trades_completed)],
+    ].map(function (r) {
+      return "<div><dt>" + r[0] + "</dt><dd>" + esc(r[1]) + "</dd></div>";
+    }).join("");
+
+    var about = info
+      ? '<p class="about"><strong>' + esc(c.strategy) + '</strong> — ' + esc(info.kind) +
+        ': ' + esc(info.blurb) + '</p>'
+      : '';
+    var oosNote = '<p class="about oos-note ' + esc(oosInfo.tone) + '"><strong>' +
+      esc(oosInfo.label) + '.</strong> ' + esc(oosInfo.blurb) + '</p>';
+
+    return '<div class="win-card">' +
+      '<button type="button" class="win-toggle" aria-expanded="false" data-window="' + esc(wlabel) + '">' +
+        '<span class="win-win">' + esc(label) + '</span>' +
+        '<span class="win-name" title="' + esc(info ? info.kind + ": " + info.blurb : "") + '">' +
+          esc(c.strategy) + '</span>' +
+        '<span class="win-metric">Win rate ' + fmtPct(c.win_rate) + ' · ' +
+          esc(c.trades_completed || 0) + ' trades</span>' +
+        oos +
+        '<span class="win-caret" aria-hidden="true">▾</span>' +
+      '</button>' +
+      '<div class="win-detail" hidden>' +
+        '<dl class="win-stats">' + stats + '</dl>' +
+        (c.low_confidence ? '<p class="note warn">Low confidence — few trades.</p>' : '') +
+        about +
+        oosNote +
+        '<div class="win-trades" data-trades="' + esc(wlabel) + '"></div>' +
+      '</div>' +
+    '</div>';
+  }
+
   function renderResult(resp) {
     var t = resp.data;
+    setAnalysisDate(resp.generated_at);
     if (!t) {
       demoResult.innerHTML =
         '<p class="note warn">We don’t have a cached report for <strong>' + esc(resp.ticker) +
@@ -285,26 +482,16 @@
       html += '<button type="button" class="signal-pill signal-locked" data-unlock="' +
               esc(resp.ticker) + '">🔒 Live signal — unlock by email</button>';
     }
+    var asOf = fmtDate(resp.generated_at);
+    if (asOf) {
+      html += '<span class="as-of" title="When this analysis was generated">Analysis as of ' +
+              esc(asOf) + '</span>';
+    }
     html += '</div>';
 
     html += '<div class="matrix">';
     ["1y", "3y", "5y", "10y"].forEach(function (w) {
-      var c = (t.windows || {})[w];
-      html += '<div class="win-card">';
-      html += '<div class="win-win">' + esc(WINDOW_LABELS[w] || w) + '</div>';
-      if (c && c.strategy) {
-        html += '<div class="win-name">' + esc(c.strategy) + '</div>';
-        html += '<div class="win-metric">Win rate ' + fmtPct(c.win_rate) + ' · ' +
-                esc(c.trades_completed || 0) + ' trades</div>';
-        if (c.oos === true) {
-          html += '<span class="oos oos-true">✓ Held up out-of-sample</span>';
-        } else if (c.oos === false) {
-          html += '<span class="oos oos-false">⚠ Likely overfit</span>';
-        }
-      } else {
-        html += '<div class="win-name muted">—</div>';
-      }
-      html += '</div>';
+      html += winCard(w, (t.windows || {})[w]);
     });
     html += '</div>';
 
@@ -316,6 +503,31 @@
               ? 'Live signal unlocked for this browser ✓'
               : '<a href="#offer">Get this signal by email →</a>') + '</p>';
     demoResult.innerHTML = html;
+
+    // Drill-down: expand a window card to reveal the raw metrics + trades.
+    demoResult.querySelectorAll(".win-toggle").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        var open = btn.getAttribute("aria-expanded") === "true";
+        btn.setAttribute("aria-expanded", String(!open));
+        var card = btn.parentElement;
+        card.classList.toggle("open", !open);
+        var detail = card.querySelector(".win-detail");
+        if (detail) detail.hidden = open;
+        if (open) return;  // just collapsed
+        var window_ = btn.getAttribute("data-window");
+        track("window_detail", { ticker: resp.ticker, window: window_ });
+        var box = detail && detail.querySelector("[data-trades]");
+        if (!box || box.getAttribute("data-loaded") === "1") return;
+        if (tradesCache[resp.ticker] === undefined) {
+          box.innerHTML = '<p class="note muted">Loading trades…</p>';
+        }
+        loadTrades(resp.ticker, function (data) {
+          var rows = data && data.windows ? data.windows[window_] : null;
+          renderTrades(box, rows, (data && data.columns) || TRADE_COLUMNS);
+          box.setAttribute("data-loaded", "1");
+        });
+      });
+    });
 
     var lockBtn = demoResult.querySelector("[data-unlock]");
     if (lockBtn) {
@@ -465,11 +677,35 @@
 
   // Pre-load the known-ticker list so quick picks feel responsive.
   fetch("/api/demo?ticker=").then(function (r) { return r.json(); })
-    .then(function (j) { demoKnown = j.known || []; }).catch(function () {});
+    .then(function (j) { demoKnown = j.known || []; setAnalysisDate(j.generated_at); }).catch(function () {});
 
-  // Company-name index + per-field autocomplete ("Apple" -> AAPL).
+  /* ---------- glossary panel ("what do these mean?") ---------- */
+  function renderGlossary() {
+    var body = document.getElementById("glossary-body");
+    if (!body) return;
+    var strategies = Object.keys(STRATEGY_INFO).map(function (label) {
+      var i = STRATEGY_INFO[label];
+      return '<div class="gloss-item"><h4>' + esc(label) +
+        ' <span class="gloss-kind">' + esc(i.kind) + "</span></h4><p>" + esc(i.blurb) + "</p></div>";
+    }).join("");
+    var badges = ["true", "false", "null"].map(function (key) {
+      var i = OOS_INFO[key];
+      return '<div class="gloss-item ' + esc(i.tone) + '"><h4>' + esc(i.label) +
+        "</h4><p>" + esc(i.blurb) + "</p></div>";
+    }).join("");
+    body.innerHTML =
+      '<div class="gloss-grid">' + strategies + "</div>" +
+      '<h4 class="gloss-head">The honesty badge</h4>' +
+      '<div class="gloss-grid">' + badges + "</div>" +
+      '<p class="note">Every backtest runs against real point-in-time S&amp;P 500 ' +
+      "membership — including the companies that were later removed — so the results " +
+      "aren’t flattered by survivorship bias.</p>";
+  }
+
+  /* ---------- company-name index + per-field autocomplete ("Apple" -> AAPL). ---------- */
   loadTickerIndex();
   ["#hero-ticker", "#demo-ticker", "#offer-ticker"].forEach(function (sel) {
     var el = $(sel); if (el) attachCombo(el);
   });
+  renderGlossary();
 })();
