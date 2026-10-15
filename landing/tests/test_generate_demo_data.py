@@ -1,12 +1,15 @@
 """Tests for landing/generate_demo_data.py.
 
-Pure helpers (date windows, signal/metric extraction) are unit-tested with
+Pure helpers (date windows, signal/metric/trade extraction) are unit-tested with
 synthetic inputs. The ``build`` integration test runs the real stardust engine
-over one ticker's Parquet data and is skipped when that data is unavailable.
+over one ticker's Parquet data and is skipped when that data is unavailable. The
+``main`` tests stub the engine out to verify the CLI's file-writing contract
+(both files, ``--skip-trades``, ``--trades-output`` and ``--resume``).
 """
 
 from __future__ import annotations
 
+import json
 from datetime import datetime
 from pathlib import Path
 
@@ -180,3 +183,105 @@ class TestTrades:
     def test_empty_inputs(self):
         assert gen._trades({}) == []
         assert gen._trades({"trades": []}) == []
+
+
+class TestEmptyTradesPayload:
+    def test_structure(self):
+        payload = gen._empty_trades_payload()
+        assert payload["columns"] == gen.TRADE_COLUMNS
+        assert payload["trades"] == {}
+        assert datetime.fromisoformat(payload["generated_at"])
+
+
+def _fake_entry(ticker: str) -> dict:
+    return {
+        "name": f"{ticker} Inc.",
+        "signal": {"direction": "BUY", "strength": 0.5, "as_of": "2026-01-01", "strategy": "MA 50/200"},
+        "windows": {
+            "1y": {"strategy": "MA 50/200", "low_confidence": False, "oos": None,
+                   "win_rate": 0.5, "total_pnl": 12.0, "cagr": 0.1, "sharpe": 1.0,
+                   "trades_completed": 1},
+        },
+    }
+
+
+def _fake_trades() -> dict:
+    return {"1y": [["2026-01-02", 100.0, "2026-01-10", 105.0, 5.0, 5.0, 8, "signal"]]}
+
+
+class TestBuild:
+    def test_mirrors_signals_and_trades(self, monkeypatch):
+        def fake(ticker, data_dir, skip_oos, min_trades):
+            return None if ticker == "NOPE" else (_fake_entry(ticker), _fake_trades())
+
+        monkeypatch.setattr(gen, "build_ticker", fake)
+        signals, trades = gen.build(["AAPL", "NOPE"], Path("."), skip_oos=False, min_trades=3)
+        assert set(signals["tickers"]) == {"AAPL"}
+        assert set(trades["trades"]) == {"AAPL"}
+        assert trades["columns"] == gen.TRADE_COLUMNS
+
+
+class TestMain:
+    @pytest.fixture
+    def stub(self, monkeypatch):
+        """Replace the engine-backed build with a deterministic stub, recording calls."""
+        calls = []
+
+        def fake(ticker, data_dir, skip_oos, min_trades):
+            calls.append(ticker)
+            return _fake_entry(ticker), _fake_trades()
+
+        monkeypatch.setattr(gen, "build_ticker", fake)
+        return calls
+
+    def test_writes_both_files(self, tmp_path, stub):
+        sig, trd = tmp_path / "demo_signals.json", tmp_path / "demo_trades.json"
+        gen.main(["--tickers", "AAPL", "NVDA",
+                  "--output", str(sig), "--trades-output", str(trd)])
+        signals, trades = json.loads(sig.read_text()), json.loads(trd.read_text())
+        assert set(signals["tickers"]) == {"AAPL", "NVDA"}
+        assert set(trades["trades"]) == {"AAPL", "NVDA"}
+        assert signals["oos_definition"]
+        assert trades["columns"] == gen.TRADE_COLUMNS
+        assert stub == ["AAPL", "NVDA"]
+
+    def test_skip_trades_writes_only_signals(self, tmp_path, stub):
+        sig, trd = tmp_path / "s.json", tmp_path / "t.json"
+        gen.main(["--tickers", "AAPL", "--output", str(sig),
+                  "--trades-output", str(trd), "--skip-trades"])
+        assert sig.exists()
+        assert not trd.exists()
+
+    def test_resume_skips_existing_tickers(self, tmp_path, stub):
+        sig, trd = tmp_path / "s.json", tmp_path / "t.json"
+        sig.write_text(json.dumps({
+            "generated_at": "2026-01-01T00:00:00+00:00", "oos_definition": "x",
+            "tickers": {"AAPL": _fake_entry("AAPL")},
+        }))
+        gen.main(["--tickers", "AAPL", "NVDA", "--output", str(sig),
+                  "--trades-output", str(trd), "--resume"])
+        assert stub == ["NVDA"]                      # AAPL was kept, not recomputed
+        assert set(json.loads(sig.read_text())["tickers"]) == {"AAPL", "NVDA"}
+
+    def test_resume_preserves_existing_trades(self, tmp_path, stub):
+        sig, trd = tmp_path / "s.json", tmp_path / "t.json"
+        sig.write_text(json.dumps({
+            "generated_at": "2026-01-01T00:00:00+00:00", "oos_definition": "x",
+            "tickers": {"AAPL": _fake_entry("AAPL")},
+        }))
+        trd.write_text(json.dumps({
+            "generated_at": "2026-01-01T00:00:00+00:00", "columns": gen.TRADE_COLUMNS,
+            "trades": {"AAPL": {"1y": [["2025-01-02", 1.0, "2025-01-03", 2.0, 1.0, 1.0, 1, "signal"]]}},
+        }))
+        gen.main(["--tickers", "AAPL", "NVDA", "--output", str(sig),
+                  "--trades-output", str(trd), "--resume"])
+        trades = json.loads(trd.read_text())
+        assert set(trades["trades"]) == {"AAPL", "NVDA"}
+        assert trades["trades"]["AAPL"]["1y"][0][0] == "2025-01-02"  # not overwritten
+
+    def test_no_data_ticker_is_omitted(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(gen, "build_ticker", lambda *a, **k: None)
+        sig, trd = tmp_path / "s.json", tmp_path / "t.json"
+        gen.main(["--tickers", "ZZZZ", "--output", str(sig), "--trades-output", str(trd)])
+        assert json.loads(sig.read_text())["tickers"] == {}
+        assert json.loads(trd.read_text())["trades"] == {}
