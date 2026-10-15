@@ -62,6 +62,49 @@ class TestTradeColumns:
         assert _frontend_trade_columns() == gen.TRADE_COLUMNS
 
 
+class TestConsensusPresentation:
+    def test_mixed_state_is_styled(self):
+        css = (BASE / "styles.css").read_text(encoding="utf-8")
+        assert ".signal-MIXED" in css
+
+    def test_app_renders_consensus_pill(self):
+        assert "function consensusPill" in APP_JS
+        assert "windows agree" in APP_JS
+
+    def test_emitted_signal_is_a_consensus(self):
+        if not SIGNALS_JSON.exists():
+            pytest.skip("demo_signals.json not present")
+        payload = json.loads(SIGNALS_JSON.read_text(encoding="utf-8"))
+        for ticker, entry in payload["tickers"].items():
+            sig = entry["signal"]
+            assert set(sig) == {"direction", "agree", "total", "consensus", "as_of"}, ticker
+            assert sig["consensus"] == (sig["direction"] is not None), ticker
+            assert sig["total"] >= sig["agree"] >= 0, ticker
+            winners = [c for c in entry["windows"].values() if c.get("strategy")]
+            assert sig["total"] == len(winners), ticker
+
+    def test_winning_windows_expose_a_call(self):
+        if not SIGNALS_JSON.exists():
+            pytest.skip("demo_signals.json not present")
+        payload = json.loads(SIGNALS_JSON.read_text(encoding="utf-8"))
+        for ticker, entry in payload["tickers"].items():
+            for cell in entry["windows"].values():
+                if cell.get("strategy"):
+                    assert "call" in cell, ticker
+
+
+class TestDemoJsonIntegrity:
+    def test_committed_demo_json_is_strict(self):
+        for name in ("demo_signals.json", "demo_trades.json"):
+            path = BASE / name
+            if not path.exists():
+                pytest.skip(f"{name} not present")
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            # allow_nan=False raises if any bare NaN/Infinity slipped in — the
+            # browser's JSON.parse rejects those, so they must never ship.
+            json.dumps(payload, allow_nan=False)
+
+
 class TestGlossaryMount:
     def test_index_has_glossary_mount(self):
         assert 'id="glossary-body"' in (BASE / "index.html").read_text(encoding="utf-8")

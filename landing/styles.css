@@ -178,6 +178,7 @@ input::placeholder { color: #5f7186; }
 .signal-BUY { background: rgba(52, 211, 153, 0.15); color: var(--accent); border: 1px solid rgba(52, 211, 153, 0.4); }
 .signal-SELL { background: rgba(248, 113, 113, 0.15); color: var(--danger); border: 1px solid rgba(248, 113, 113, 0.4); }
 .signal-HOLD, .signal-FLAT { background: rgba(147, 163, 181, 0.15); color: var(--muted); border: 1px solid var(--border); }
+.signal-MIXED { background: rgba(251, 191, 36, 0.12); color: var(--warn); border: 1px solid rgba(251, 191, 36, 0.35); }
 .signal-locked {
   background: rgba(147, 163, 181, 0.10); color: var(--text);
   border: 1px dashed var(--border); cursor: pointer; font-family: inherit;
@@ -192,6 +193,8 @@ input::placeholder { color: #5f7186; }
 .win-card .win-win { color: var(--muted); font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.08em; }
 .win-card .win-name { font-weight: 700; margin: 4px 0 8px; }
 .win-card .win-metric { color: var(--muted); font-size: 0.85rem; }
+.win-call { display: inline-block; margin-top: 6px; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.02em; padding: 2px 9px; border-radius: 999px; }
+.matrix-cap { color: var(--muted); font-size: 0.82rem; margin: 14px 0 0; }
 
 .win-toggle {
   display: flex; flex-direction: column; align-items: flex-start;
