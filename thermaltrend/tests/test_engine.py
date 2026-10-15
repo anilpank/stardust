@@ -126,6 +126,20 @@ class TestDataEngine:
         d2_indices = [i for i, d in enumerate(dates_seen) if d == d2]
         assert max(d1_indices) < min(d2_indices)
 
+    def test_within_date_ticker_order_preserved(self, tmp_path):
+        """Events stream date-then-ticker, matching the sorted feed index."""
+        dates = [datetime(2026, 1, i + 1) for i in range(2)]
+        for ticker in ("ZZZZ", "MMMM", "AAAA"):
+            _make_parquet(tmp_path, ticker, [(d, 100.0) for d in dates])
+
+        feed = DataFeed(tmp_path)
+        strategy = _StubStrategy()
+        DataEngine(feed, strategy).run()
+
+        seen = [(e.timestamp, e.ticker) for e in strategy.events]
+        assert seen == sorted(seen)
+        assert len(seen) == 6
+
     def test_ma_crossover_integration(self, tmp_path):
         """Full integration: DataFeed → DataEngine → MACrossoverStrategy."""
         dates = [datetime(2026, 1, i + 1) for i in range(10)]
