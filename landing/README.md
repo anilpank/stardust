@@ -99,16 +99,20 @@ Run these **from the repo root** on a machine with the full repo + Parquet data
 # 1. Company-name index (fast). From the current S&P 500 membership table.
 python landing/generate_ticker_index.py
 
-# 2. Signals + trades for the whole S&P 500. Long-running (~25-30 min).
-#    Writes demo_signals.json and demo_trades.json. Checkpoints after every
-#    ticker and --resume continues an interrupted run.
-python landing/generate_demo_data.py --resume \
+# 2. Signals + trades for the whole S&P 500. Writes demo_signals.json and
+#    demo_trades.json, checkpointing after every ticker (--resume continues an
+#    interrupted run). --workers parallelises across tickers: ~25 min sequential
+#    drops to a few minutes on 4-8 cores (output is byte-identical either way).
+python landing/generate_demo_data.py --resume --workers 8 \
   --tickers $(python -c "import json;print(' '.join(e['ticker'] for e in json.load(open('landing/tickers.json'))['tickers']))")
 ```
 
 Useful flags for `generate_demo_data.py`:
 
 - `--tickers AAPL NVDA KO` — a subset instead of the whole index.
+- `--workers N` — run N tickers concurrently (default 1 = sequential). 0 or
+  negative also means sequential. Per-ticker work is independent, so the output
+  is identical; only wall-clock changes.
 - `--skip-oos` — skip the out-of-sample holdout (much faster; drops the honesty badge).
 - `--skip-trades` / `--trades-output PATH` — skip or redirect `demo_trades.json`.
 - `--min-trades N` — minimum trades for a strategy to be recommended (default 3).

@@ -11,12 +11,14 @@ the product would use, not invented.
 Usage (from the repo root):
     python landing/generate_demo_data.py
     python landing/generate_demo_data.py --tickers AAPL NVDA KO --skip-oos
+    python landing/generate_demo_data.py --workers 8   # parallelise across tickers
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -43,6 +45,9 @@ TRADE_COLUMNS = [
     "Entry Date", "Entry Price", "Exit Date", "Exit Price",
     "P&L ($)", "P&L (%)", "Holding (days)", "Exit Reason",
 ]
+
+# Swappable so tests can run the parallel path in-process (ThreadPoolExecutor).
+_pool_factory = ProcessPoolExecutor
 
 
 def _latest_date(ticker: str, data_dir: Path) -> pd.Timestamp | None:
@@ -201,6 +206,41 @@ def build(tickers: list[str], data_dir: Path, skip_oos: bool, min_trades: int
     return generated, trades_payload
 
 
+def _safe_build(ticker: str, data_dir: Path, skip_oos: bool, min_trades: int):
+    """build_ticker that isolates failures so one bad ticker can't kill the run."""
+    try:
+        return build_ticker(ticker, data_dir, skip_oos, min_trades)
+    except Exception as exc:  # defensive: keep a full-universe run going
+        print(f"  ! {ticker}: failed ({exc})")
+        return None
+
+
+def _process_all(tickers: list[str], data_dir: Path, skip_oos: bool, min_trades: int,
+                 workers: int, on_result) -> None:
+    """Run build_ticker over ``tickers``, sequentially or across worker processes.
+
+    ``on_result(ticker, result)`` is called as each ticker finishes (order of
+    completion under ``workers > 1``), so the caller can checkpoint incrementally.
+    """
+    if workers <= 1:
+        for ticker in tickers:
+            on_result(ticker, _safe_build(ticker, data_dir, skip_oos, min_trades))
+        return
+    with _pool_factory(max_workers=workers) as executor:
+        futures = {
+            executor.submit(_safe_build, t, data_dir, skip_oos, min_trades): t
+            for t in tickers
+        }
+        for future in as_completed(futures):
+            ticker = futures[future]
+            try:
+                result = future.result()
+            except Exception as exc:  # defensive: a crashed worker is a skip
+                print(f"  ! {ticker}: worker crashed ({exc})")
+                result = None
+            on_result(ticker, result)
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description="Generate landing-page demo signals.")
     parser.add_argument("--tickers", nargs="+", default=DEFAULT_TICKERS)
@@ -213,6 +253,8 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--min-trades", type=int, default=3)
     parser.add_argument("--resume", action="store_true",
                         help="Keep tickers already in --output and compute only the rest")
+    parser.add_argument("--workers", type=int, default=1,
+                        help="Parallel worker processes (default 1 = sequential)")
     args = parser.parse_args(argv)
 
     data_dir = Path(args.data_dir)
@@ -233,24 +275,55 @@ def main(argv: list[str] | None = None) -> None:
     else:
         trades_payload = _empty_trades_payload()
 
+    # Capture the pre-existing key order so newly computed tickers can be
+    # appended in request order — a parallel run then serialises identically to
+    # a sequential one (deterministic, diff-stable output).
+    initial_signal_keys = list(payload["tickers"].keys())
+    initial_trade_keys = list(trades_payload["trades"].keys())
+
+    def _ordered(mapping: dict, initial_keys: list[str]) -> dict:
+        present = set(mapping)
+        ordered = {k: mapping[k] for k in initial_keys if k in present}
+        for t in args.tickers:
+            if t in present and t not in ordered:
+                ordered[t] = mapping[t]
+        for k in mapping:  # anything unaccounted for (defensive)
+            ordered.setdefault(k, mapping[k])
+        return ordered
+
+    def checkpoint() -> None:
+        # Write after every ticker so a long full-universe run is resumable.
+        stamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        payload["generated_at"] = stamp
+        signal_payload = dict(payload)
+        signal_payload["tickers"] = _ordered(payload["tickers"], initial_signal_keys)
+        out.write_text(json.dumps(signal_payload, indent=2), encoding="utf-8")
+        if not args.skip_trades:
+            trades_payload["generated_at"] = stamp
+            trade_payload = dict(trades_payload)
+            trade_payload["trades"] = _ordered(trades_payload["trades"], initial_trade_keys)
+            trades_out.write_text(json.dumps(trade_payload, separators=(",", ":")), encoding="utf-8")
+
+    pending = [t for t in args.tickers if not (args.resume and t in payload["tickers"])]
+
     print(f"Generating demo data for: {', '.join(args.tickers)}")
-    for i, ticker in enumerate(args.tickers, 1):
-        if args.resume and ticker in payload["tickers"]:
-            continue
-        result = build_ticker(ticker, data_dir, args.skip_oos, args.min_trades)
+    if args.workers > 1:
+        print(f"Using {args.workers} worker processes")
+
+    done = 0
+
+    def on_result(ticker: str, result) -> None:
+        nonlocal done
+        done += 1
         if result is not None:
             entry, trades = result
             payload["tickers"][ticker] = entry
             if not args.skip_trades:
                 trades_payload["trades"][ticker] = trades
-        # Checkpoint after every ticker so a long full-universe run is resumable.
-        stamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
-        payload["generated_at"] = stamp
-        out.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-        if not args.skip_trades:
-            trades_payload["generated_at"] = stamp
-            trades_out.write_text(json.dumps(trades_payload, separators=(",", ":")), encoding="utf-8")
-        print(f"    [{i}/{len(args.tickers)}] {len(payload['tickers'])} tickers written")
+        checkpoint()
+        print(f"    [{done}/{len(pending)}] {len(payload['tickers'])} tickers written")
+
+    _process_all(pending, data_dir, args.skip_oos, args.min_trades, args.workers, on_result)
 
     print(f"\nWrote {out}  ({len(payload['tickers'])} tickers)")
     if not args.skip_trades:

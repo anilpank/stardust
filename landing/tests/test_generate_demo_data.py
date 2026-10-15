@@ -10,6 +10,7 @@ over one ticker's Parquet data and is skipped when that data is unavailable. The
 from __future__ import annotations
 
 import json
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
 
@@ -285,3 +286,46 @@ class TestMain:
         gen.main(["--tickers", "ZZZZ", "--output", str(sig), "--trades-output", str(trd)])
         assert json.loads(sig.read_text())["tickers"] == {}
         assert json.loads(trd.read_text())["trades"] == {}
+
+    def test_workers_writes_all_in_request_order(self, tmp_path, stub, monkeypatch):
+        # Run the parallel path in-process (threads) so the stubbed engine is visible.
+        monkeypatch.setattr(gen, "_pool_factory", ThreadPoolExecutor)
+        sig, trd = tmp_path / "s.json", tmp_path / "t.json"
+        gen.main(["--tickers", "KO", "AAPL", "NVDA", "--output", str(sig),
+                  "--trades-output", str(trd), "--workers", "3"])
+        assert list(json.loads(sig.read_text())["tickers"]) == ["KO", "AAPL", "NVDA"]
+        assert list(json.loads(trd.read_text())["trades"]) == ["KO", "AAPL", "NVDA"]
+        assert set(stub) == {"KO", "AAPL", "NVDA"}
+
+
+class TestProcessAll:
+    def test_sequential_calls_in_order(self, monkeypatch):
+        monkeypatch.setattr(gen, "build_ticker",
+                            lambda t, *a, **k: (_fake_entry(t), _fake_trades()))
+        seen = []
+        gen._process_all(["AAPL", "NVDA", "KO"], Path("."), False, 3, 1,
+                         lambda t, r: seen.append(t))
+        assert seen == ["AAPL", "NVDA", "KO"]
+
+    def test_parallel_collects_every_result(self, monkeypatch):
+        monkeypatch.setattr(gen, "_pool_factory", ThreadPoolExecutor)
+        monkeypatch.setattr(gen, "build_ticker",
+                            lambda t, *a, **k: (_fake_entry(t), _fake_trades()))
+        seen = {}
+        gen._process_all(["AAPL", "NVDA", "KO", "JPM"], Path("."), False, 3, 3,
+                         lambda t, r: seen.__setitem__(t, r))
+        assert set(seen) == {"AAPL", "NVDA", "KO", "JPM"}
+        assert all(r is not None for r in seen.values())
+
+    def test_failing_ticker_is_isolated(self, monkeypatch):
+        def fake(ticker, *a, **k):
+            if ticker == "BAD":
+                raise RuntimeError("boom")
+            return _fake_entry(ticker), _fake_trades()
+
+        monkeypatch.setattr(gen, "build_ticker", fake)
+        seen = {}
+        gen._process_all(["AAPL", "BAD", "KO"], Path("."), False, 3, 1,
+                         lambda t, r: seen.__setitem__(t, r))
+        assert seen["BAD"] is None
+        assert seen["AAPL"] is not None and seen["KO"] is not None
