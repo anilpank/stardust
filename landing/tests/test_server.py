@@ -12,6 +12,7 @@ import base64
 import csv
 import json
 import os
+import re
 import sqlite3
 
 import pytest
@@ -137,6 +138,14 @@ class TestStaticRoutes:
         resp = client.get("/")
         assert resp.status_code == 200
         assert b"Stop guessing" in resp.data
+
+    def test_index_copy_leads_with_out_of_sample(self, client):
+        html = client.get("/").data.decode("utf-8")
+        assert "whether it still works" in html
+        # Prose must not leak the em-dash machine-writing tell (comments are not
+        # visitor-facing, so strip them before checking).
+        prose = re.sub(r"<!--.*?-->", "", html, flags=re.S)
+        assert "\u2014" not in prose
 
     def test_admin_page_requires_auth(self, client):
         resp = client.get("/admin")
