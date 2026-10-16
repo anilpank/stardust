@@ -4,7 +4,7 @@ from unittest.mock import patch
 import pandas as pd
 import pytest
 
-from thermaltrend.update_data import ensure_spy, get_existing_tickers, update_ticker
+from thermaltrend.update_data import ensure_spy, format_summary, get_existing_tickers, update_ticker
 
 
 @pytest.fixture
@@ -289,6 +289,23 @@ class TestEnsureSpy:
         assert (nested / "SPY.parquet").exists()
 
 
+class TestFormatSummary:
+    def test_reports_counts_and_elapsed(self):
+        out = format_summary({"updated": 3, "up_to_date": 2, "failed": 1}, ["BAD"], 65)
+        assert "Done in 1:05" in out
+        assert "Updated:" in out and "3" in out
+        assert "Already current:" in out
+        assert "Failed:" in out
+
+    def test_lists_failed_tickers(self):
+        out = format_summary({"updated": 0, "up_to_date": 0, "failed": 2}, ["AAPL", "MSFT"], 10)
+        assert "AAPL, MSFT" in out
+
+    def test_no_failed_tickers_line_when_none(self):
+        out = format_summary({"updated": 1, "up_to_date": 0, "failed": 0}, [], 5)
+        assert "Failed tickers:" not in out
+
+
 class TestMainEnsureSpyCalled:
     @patch("thermaltrend.update_data.update_ticker")
     @patch("thermaltrend.update_data.ensure_spy")
@@ -326,3 +343,23 @@ class TestMainEnsureSpyCalled:
 
         tickers_updated = [call[0][0] for call in mock_update.call_args_list]
         assert "SPY" in tickers_updated
+
+    @patch("thermaltrend.update_data.update_ticker")
+    @patch("thermaltrend.update_data.ensure_spy")
+    def test_main_prints_summary(self, mock_ensure, mock_update, tmp_path, capsys, sample_ohlcv):
+        _write_parquet(tmp_path, "AAPL", sample_ohlcv)
+        mock_update.return_value = "updated"
+
+        import thermaltrend.update_data as update_mod
+        original_data_dir = update_mod.DATA_DIR
+        update_mod.DATA_DIR = tmp_path
+        try:
+            with patch("sys.argv", ["update_data.py", "--output", str(tmp_path)]):
+                update_mod.main()
+        finally:
+            update_mod.DATA_DIR = original_data_dir
+
+        out = capsys.readouterr().out
+        assert "Done in" in out
+        assert "Updated:" in out
+        assert "Already current:" in out

@@ -20,6 +20,8 @@ from pathlib import Path
 import pandas as pd
 import yfinance as yf
 
+from thermaltrend.progress import Progress, format_duration
+
 DATA_DIR = Path(__file__).parent / "data" / "equities"
 
 
@@ -56,24 +58,26 @@ def ensure_spy(data_dir: Path) -> None:
         print(f"  SPY - FAILED to download: {e}")
 
 
-def update_ticker(ticker: str, data_dir: Path) -> str:
+def update_ticker(ticker: str, data_dir: Path, log=print) -> str:
     """Download incremental data for one ticker and overwrite its parquet file.
 
-    Returns a status string: 'updated', 'up_to_date', or 'failed'.
+    Returns a status string: 'updated', 'up_to_date', or 'failed'. ``log`` is
+    called with each human-readable message (defaults to :func:`print`) so the
+    caller can route output through a progress reporter.
     """
     out_path = data_dir / f"{ticker}.parquet"
 
     try:
         existing = pd.read_parquet(out_path)
     except Exception as e:
-        print(f"  {ticker} - FAILED to read existing file: {e}")
+        log(f"  {ticker} - FAILED to read existing file: {e}")
         return "failed"
 
     last_date = existing.index.max()
     today = pd.Timestamp.now().normalize()
 
     if last_date >= today:
-        print(f"  {ticker} - already up to date (last: {last_date.date()})")
+        log(f"  {ticker} - already up to date (last: {last_date.date()})")
         return "up_to_date"
 
     start_date = (last_date + timedelta(days=1)).strftime("%Y-%m-%d")
@@ -84,7 +88,7 @@ def update_ticker(ticker: str, data_dir: Path) -> str:
             ticker, start=start_date, end=end_date, auto_adjust=True, progress=False
         )
         if new_data.empty:
-            print(f"  {ticker} - no new data returned (last: {last_date.date()})")
+            log(f"  {ticker} - no new data returned (last: {last_date.date()})")
             return "up_to_date"
 
         if isinstance(new_data.columns, pd.MultiIndex):
@@ -96,18 +100,31 @@ def update_ticker(ticker: str, data_dir: Path) -> str:
 
         new_rows = len(combined) - len(existing)
         if new_rows == 0:
-            print(f"  {ticker} - already up to date (last: {last_date.date()})")
+            log(f"  {ticker} - already up to date (last: {last_date.date()})")
             return "up_to_date"
 
         combined.to_parquet(out_path)
-        print(f"  {ticker} - updated (+{new_rows} rows, now {len(combined)} total)")
+        log(f"  {ticker} - updated (+{new_rows} rows, now {len(combined)} total)")
         return "updated"
 
     except Exception as e:
-        print(f"  {ticker} - FAILED to download: {e}")
+        log(f"  {ticker} - FAILED to download: {e}")
         return "failed"
     finally:
         gc.collect()
+
+
+def format_summary(counts: dict, failed: list[str], elapsed: float) -> str:
+    """Build the end-of-run summary block shown on the command line."""
+    lines = [
+        f"Done in {format_duration(elapsed)}",
+        f"  {'Updated:':<17}{counts['updated']}",
+        f"  {'Already current:':<17}{counts['up_to_date']}",
+        f"  {'Failed:':<17}{counts['failed']}",
+    ]
+    if failed:
+        lines.append(f"  {'Failed tickers:':<17}{', '.join(failed)}")
+    return "\n".join(lines)
 
 
 def main():
@@ -138,16 +155,21 @@ def main():
     print(f"Updating {len(tickers)} tickers...")
     print(f"Data directory: {data_dir}\n")
 
+    progress = Progress(len(tickers), label="Updating")
     counts = {"updated": 0, "up_to_date": 0, "failed": 0}
+    failed: list[str] = []
 
     for i, ticker in enumerate(tickers, 1):
-        print(f"[{i}/{len(tickers)}]", end="")
-        status = update_ticker(ticker, data_dir)
+        status = update_ticker(ticker, data_dir, log=progress.log)
         counts[status] += 1
+        if status == "failed":
+            failed.append(ticker)
+        progress.update(i, note=ticker)
         if i < len(tickers):
             time.sleep(0.25)
 
-    print(f"\nDone. Updated: {counts['updated']}, Up to date: {counts['up_to_date']}, Failed: {counts['failed']}")
+    progress.close()
+    print(format_summary(counts, failed, progress.elapsed))
 
 
 if __name__ == "__main__":
