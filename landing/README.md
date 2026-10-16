@@ -42,10 +42,10 @@ That's it — the first pulls the latest code, the second updates the app, resta
 | `styles.css` | Styling (dark fintech theme, responsive). |
 | `app.js` | Ticker lookup, matrix rendering, funnel tracking, signup. |
 | `admin.html` / `admin.js` / `admin.css` | Read-only console: KPIs, funnel, leads, events. |
-| `server.py` | Flask app: serves the page + `/api/signup`, `/api/track`, `/api/demo`, `/api/trades`, `/admin`. |
+| `server.py` | Flask app: serves the page + `/api/signup`, `/api/track`, `/api/demo`, `/api/trades`, `/api/quote`, `/admin`. |
 | `gen_admin_password.py` | Generates an `ADMIN_PASS_HASH` (`salt:hash`) for admin Basic auth. |
 | `generate_demo_data.py` | Runs the real engine → writes `demo_signals.json` + `demo_trades.json`. |
-| `demo_signals.json` | Pre-computed winning strategy per ticker × timeframe + OOS badge. |
+| `demo_signals.json` | Pre-computed winning strategy per ticker × timeframe + OOS badge, latest close, and each call's signal date/price/return-since. |
 | `demo_trades.json` | Pre-computed actual trades per ticker × timeframe (powers the drill-down). |
 | `generate_ticker_index.py` | Builds `tickers.json` (ticker → company name) from the membership table. |
 | `tickers.json` | Offline name index so visitors can search by company name. |
@@ -78,7 +78,7 @@ scripts — the server never runs the engine, it only reads the JSON:
 
 | File | What it is | Regenerate with |
 |------|------------|-----------------|
-| `demo_signals.json` | Winning strategy per ticker × timeframe, OOS badge, current signal | `generate_demo_data.py` |
+| `demo_signals.json` | Winning strategy per ticker × timeframe, OOS badge, current signal, latest close and each call's signal date/price/return-since | `generate_demo_data.py` |
 | `demo_trades.json` | Actual completed trades behind each winning strategy (drill-down) | `generate_demo_data.py` |
 | `tickers.json` | ticker → company name, powers company-name search | `generate_ticker_index.py` |
 
@@ -371,6 +371,17 @@ event, and re-renders the current ticker's result. Unlock is client-side only
 (persisted per browser via `localStorage.sd_unlocked`) — no accounts or server
 gating, which is all a short experiment needs. To A/B the gate, split traffic by
 `utm_source` and compare `email_submit` and `lookups/visitor`.
+
+Unlocking also reveals the **price context**: the date the headline call first
+appeared (`since`), the price it appeared at (next open after the signal, or the
+signal day's close when there is no later bar), and the move since — sourced from
+the committed backtest closes in `demo_signals.json`, not a live feed. The
+per-window drill-down shows each window's own signal date/price/move, so it is
+clear the windows did not all flip on the same day. A separate, **ungated**
+`live` chip in the result header shows a delayed quote (`GET /api/quote`)
+proxied from Yahoo Finance and cached ~60s server-side; it degrades silently when
+Yahoo is unavailable. Quote and context are labelled as delayed/backtest so they
+are not mistaken for a real-time feed.
 
 ### Read the funnel
 

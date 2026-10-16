@@ -113,6 +113,14 @@
     if (isNaN(d.getTime())) return "";
     return d.toLocaleDateString([], { year: "numeric", month: "short", day: "numeric" });
   }
+  // Date-only strings ("2026-08-07") must not shift by a timezone, so parse the
+  // parts and build a local date instead of letting Date treat it as UTC midnight.
+  function fmtDay(s) {
+    var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(s || ""));
+    if (!m) return fmtDate(s);
+    return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]))
+      .toLocaleDateString([], { year: "numeric", month: "short", day: "numeric" });
+  }
   function debounce(fn, wait) {
     var t;
     return function () {
@@ -437,6 +445,72 @@
     return '<span class="signal-pill signal-MIXED">Mixed · no clear signal</span>';
   }
 
+  function dirClass(d) { return String(d || "").toUpperCase() === "BUY" ? "buy" : "sell"; }
+
+  // The move is the raw price change since the signal; the colour says whether
+  // that move helped the call (a rise after a SELL is a miss, so it goes red).
+  function moveSpan(pct, direction) {
+    if (pct == null || isNaN(pct)) return "";
+    var p = Number(pct) * 100;
+    if (Math.abs(p) < 0.05) return "";
+    var favorable = (String(direction || "").toUpperCase() === "BUY") ? p : -p;
+    return ' <span class="sc-move ' + (favorable >= 0 ? "pos" : "neg") + '">(' +
+      (p >= 0 ? "+" : "") + p.toFixed(1) + "% since)</span>";
+  }
+
+  // Headline context: when a consensus signal first appeared, the price it
+  // appeared at, and where the stock has moved since.
+  function signalContext(sig, price) {
+    if (!sig || !sig.consensus || !sig.direction) return "";
+    var d = String(sig.direction).toUpperCase();
+    var bits = ['<span class="sc-dir ' + dirClass(d) + '">' + esc(d) + "</span>"];
+    var held = (d === "BUY" ? "in" : "out") + " since " + esc(fmtDay(sig.since));
+    var last = price && price.last;
+    if (sig.entry_price != null) {
+      var shown = (last != null && Math.abs(Number(sig.return_pct || 0)) >= 0.0005)
+        ? "$" + fmtNum(sig.entry_price) + " \u2192 $" + fmtNum(last)
+        : "at $" + fmtNum(sig.entry_price);
+      held += ' · <span class="sc-arrow">' + shown + "</span>" + moveSpan(sig.return_pct, d);
+    }
+    bits.push(held);
+    return '<p class="signal-context">' + bits.join(" ") + "</p>";
+  }
+
+  // Per-window context for the drill-down: this window's own signal date, price
+  // and move since, so a visitor sees the windows didn't all flip on one day.
+  function windowCallContext(call) {
+    if (!call || !call.direction || call.direction === "HOLD") return "";
+    var d = String(call.direction).toUpperCase();
+    var bits = ['<span class="sc-dir ' + dirClass(d) + '">' + esc(d) + "</span>"];
+    if (call.as_of) bits.push((d === "BUY" ? "in" : "out") + " since " + esc(fmtDay(call.as_of)));
+    if (call.entry_price != null) {
+      bits.push("at $" + fmtNum(call.entry_price) + moveSpan(call.return_pct, d));
+    }
+    return '<p class="win-call-ctx">' + bits.join(" · ") + "</p>";
+  }
+
+  // Live (delayed) quote chip. The element is captured before the fetch so a
+  // slow response for a previous ticker can't overwrite a newer one.
+  function loadQuote(ticker) {
+    var el = demoResult.querySelector("[data-quote]");
+    if (!el) return;
+    fetch("/api/quote?ticker=" + encodeURIComponent(ticker))
+      .then(function (r) { return r.json(); })
+      .then(function (j) {
+        if (!j || !j.ok || !j.quote || j.quote.price == null) return;
+        var q = j.quote;
+        var pct = q.change_pct;
+        var cls = (pct == null || pct >= 0) ? "pos" : "neg";
+        var pctTxt = (pct == null) ? "" :
+          ' <span class="quote-chg">' + (pct >= 0 ? "+" : "") + (pct * 100).toFixed(2) + "%</span>";
+        el.className = "quote " + cls;
+        el.title = "Delayed quote via Yahoo Finance" + (q.as_of ? " · " + fmtDate(q.as_of) : "");
+        el.innerHTML = '<span class="quote-label">live</span> $' + fmtNum(q.price) + pctTxt;
+        el.hidden = false;
+      })
+      .catch(function () { el.hidden = true; });
+  }
+
   function winCard(wlabel, c) {
     var label = WINDOW_LABELS[wlabel] || wlabel;
     if (!c || !c.strategy) {
@@ -449,6 +523,7 @@
     if (c.oos === true) oos = '<span class="oos oos-true" title="' + esc(oosInfo.blurb) + '">✓ Held up out-of-sample</span>';
     else if (c.oos === false) oos = '<span class="oos oos-false" title="' + esc(oosInfo.blurb) + '">⚠ Likely overfit</span>';
     var call = (signalsUnlocked() && c.call && c.call.direction) ? callBadge(c.call.direction) : "";
+    var ctx = signalsUnlocked() ? windowCallContext(c.call) : "";
 
     var stats = [
       ["Win rate", fmtPct(c.win_rate)],
@@ -480,6 +555,7 @@
       '</button>' +
       '<div class="win-detail" hidden>' +
         '<dl class="win-stats">' + stats + '</dl>' +
+        ctx +
         (c.low_confidence ? '<p class="note warn">Low confidence: few trades.</p>' : '') +
         about +
         oosNote +
@@ -504,6 +580,7 @@
     html += '<div class="result-head">';
     html += '<span class="name">' + esc(t.name || resp.ticker) + '</span>';
     html += '<span class="sym">' + esc(resp.ticker) + '</span>';
+    html += '<span class="quote" data-quote hidden></span>';
     if (signalsUnlocked()) {
       html += consensusPill(sig);
     } else {
@@ -516,6 +593,10 @@
               esc(asOf) + '</span>';
     }
     html += '</div>';
+
+    if (signalsUnlocked()) {
+      html += signalContext(sig, t.price);
+    }
 
     html += '<p class="matrix-cap">' + (signalsUnlocked()
       ? 'Headline call is the majority vote of the four windows below.'
@@ -530,11 +611,12 @@
     if (resp.oos_definition) {
       html += '<p class="note">Out-of-sample check: ' + esc(resp.oos_definition) + '.</p>';
     }
-    html += '<p class="note">Illustrative prototype output from historical backtests. ' +
-            'Not investment advice. ' + (signalsUnlocked()
+    html += '<p class="note">Illustrative prototype output from historical backtests; the live ' +
+            'price chip is a delayed quote. Not investment advice. ' + (signalsUnlocked()
               ? 'Live signal unlocked for this browser ✓'
               : '<a href="#offer">Get this signal by email →</a>') + '</p>';
     demoResult.innerHTML = html;
+    loadQuote(resp.ticker);
 
     // Drill-down: expand a window card to reveal the raw metrics + trades.
     demoResult.querySelectorAll(".win-toggle").forEach(function (btn) {

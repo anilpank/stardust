@@ -163,7 +163,7 @@ class TestConsensusSignal:
         sig = gen._consensus_signal(calls)
         assert sig == {
             "direction": "BUY", "agree": 3, "total": 4,
-            "consensus": True, "as_of": "2026-09-01",
+            "consensus": True, "as_of": "2026-09-01", "since": "2026-09-01",
         }
 
     def test_half_is_not_a_majority(self):
@@ -177,6 +177,30 @@ class TestConsensusSignal:
         assert sig["direction"] is None
         assert sig["consensus"] is False
         assert sig["agree"] == 2 and sig["total"] == 4
+        assert sig["since"] is None
+
+    def test_since_is_the_latest_agreeing_call(self):
+        calls = {
+            "1y": self._call("BUY", "2026-09-01"),
+            "3y": self._call("BUY", "2026-08-15"),
+            "5y": self._call("SELL", "2026-07-24"),
+            "10y": self._call("BUY", "2026-06-10"),
+        }
+        sig = gen._consensus_signal(calls)
+        assert sig["as_of"] == "2026-09-01"
+        assert sig["since"] == "2026-09-01"
+
+    def test_since_ignores_dissenting_dates(self):
+        calls = {
+            "1y": self._call("BUY", "2026-08-01"),
+            "3y": self._call("BUY", "2026-08-15"),
+            "5y": self._call("SELL", "2026-09-20"),
+            "10y": self._call("BUY", "2026-07-10"),
+        }
+        sig = gen._consensus_signal(calls)
+        assert sig["direction"] == "BUY"
+        assert sig["as_of"] == "2026-09-20"
+        assert sig["since"] == "2026-08-15"
 
     def test_winners_without_a_call_abstain_but_count(self):
         calls = {
@@ -195,6 +219,99 @@ class TestConsensusSignal:
         assert gen._consensus_signal(
             {"1y": {"direction": "HOLD", "strength": 0.0, "as_of": None}}
         ) == gen._empty_signal()
+
+
+def _frame(rows):
+    return pd.DataFrame(
+        {
+            "Open": [r[1] for r in rows],
+            "High": [r[2] for r in rows],
+            "Low": [r[3] for r in rows],
+            "Close": [r[4] for r in rows],
+            "Volume": [1000] * len(rows),
+        },
+        index=pd.DatetimeIndex([r[0] for r in rows], name="Date"),
+    )
+
+
+class TestPriceFrame:
+    def test_missing_file_is_none(self, tmp_path):
+        assert gen._price_frame("NOPE", tmp_path) is None
+
+    def test_loads_and_sorts(self, tmp_path):
+        _write_parquet(tmp_path, "AAPL", ["2026-01-03", "2026-01-02"])
+        df = gen._price_frame("AAPL", tmp_path)
+        assert list(df.index.strftime("%Y-%m-%d")) == ["2026-01-02", "2026-01-03"]
+
+
+class TestSignalContext:
+    def test_entry_is_next_open_and_return_to_last_close(self):
+        df = _frame([
+            ("2026-01-02", 10.0, 11.0, 9.0, 10.0),
+            ("2026-01-05", 12.0, 13.0, 11.0, 12.5),
+            ("2026-01-06", 13.0, 14.0, 12.0, 15.0),
+        ])
+        entry, ret = gen._signal_context(df, "2026-01-02")
+        assert entry == 12.0            # next bar's open, not the signal-day close
+        assert ret == pytest.approx(15.0 / 12.0 - 1.0, abs=1e-4)
+
+    def test_skips_weekend_to_the_next_trading_day(self):
+        df = _frame([
+            ("2026-01-02", 10.0, 11.0, 9.0, 10.0),   # Friday
+            ("2026-01-05", 12.0, 13.0, 11.0, 12.0),   # Monday
+        ])
+        entry, _ = gen._signal_context(df, "2026-01-03")  # Saturday
+        assert entry == 12.0
+
+    def test_no_signal_date_is_none(self):
+        df = _frame([("2026-01-02", 10.0, 11.0, 9.0, 10.0)])
+        assert gen._signal_context(df, None) == (None, None)
+        assert gen._signal_context(None, "2026-01-02") == (None, None)
+
+    def test_signal_on_last_bar_falls_back_to_its_close(self):
+        df = _frame([("2026-01-02", 10.0, 11.0, 9.0, 10.0)])
+        entry, ret = gen._signal_context(df, "2026-01-02")
+        assert entry == 10.0
+        assert ret == 0.0
+
+    def test_skips_bars_with_a_missing_open(self):
+        df = _frame([
+            ("2026-01-02", 10.0, 11.0, 9.0, 10.0),
+            ("2026-01-05", None, None, None, None),
+            ("2026-01-06", 12.0, 13.0, 11.0, 15.0),
+        ])
+        entry, ret = gen._signal_context(df, "2026-01-02")
+        assert entry == 12.0            # skips the blank 01-05 bar
+        assert ret == pytest.approx(15.0 / 12.0 - 1.0, abs=1e-4)
+
+    def test_all_future_bars_blank_falls_back_to_signal_close(self):
+        df = _frame([
+            ("2026-01-02", 10.0, 11.0, 9.0, 10.0),
+            ("2026-01-05", None, None, None, None),
+        ])
+        entry, ret = gen._signal_context(df, "2026-01-02")
+        assert entry == 10.0
+        assert ret == 0.0
+
+    def test_no_close_in_data_is_none(self):
+        df = _frame([
+            ("2026-01-02", 10.0, 11.0, 9.0, None),
+            ("2026-01-05", 12.0, 13.0, 11.0, None),
+        ])
+        assert gen._signal_context(df, "2026-01-02") == (None, None)
+
+
+class TestPriceBlock:
+    def test_reports_latest_close(self):
+        df = _frame([
+            ("2026-01-02", 10.0, 11.0, 9.0, 10.0),
+            ("2026-01-05", 12.0, 13.0, 11.0, 12.34),
+        ])
+        assert gen._price_block(df) == {"last": 12.34, "as_of": "2026-01-05"}
+
+    def test_empty_is_null(self):
+        assert gen._price_block(None) == {"last": None, "as_of": None}
+        assert gen._price_block(_frame([])) == {"last": None, "as_of": None}
 
 
 class TestBuildIntegration:

@@ -171,6 +171,34 @@ input::placeholder { color: #5f7186; }
 .result-head .sym { color: var(--muted); font-weight: 600; }
 .as-of { font-size: 0.78rem; color: var(--muted); border: 1px solid var(--border); border-radius: 999px; padding: 2px 9px; }
 
+.quote {
+  display: inline-flex; align-items: baseline; gap: 6px; font-size: 0.82rem; font-weight: 700;
+  font-variant-numeric: tabular-nums; border: 1px solid var(--border); border-radius: 999px;
+  padding: 2px 10px; background: var(--panel-2);
+}
+.quote .quote-label { color: var(--muted); font-weight: 600; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em; }
+.quote .quote-chg { font-weight: 700; }
+.quote.pos .quote-chg { color: var(--accent); }
+.quote.neg .quote-chg { color: var(--danger); }
+
+.signal-context {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+  margin: 0 0 4px; font-size: 0.86rem; color: var(--muted);
+}
+.signal-context .sc-dir { font-weight: 700; }
+.signal-context .sc-dir.buy { color: var(--accent); }
+.signal-context .sc-dir.sell { color: var(--danger); }
+.signal-context .sc-arrow { font-variant-numeric: tabular-nums; color: var(--text); }
+.signal-context .sc-move.pos { color: var(--accent); font-weight: 700; }
+.signal-context .sc-move.neg { color: var(--danger); font-weight: 700; }
+
+.win-call-ctx { margin: 0 0 8px; font-size: 0.82rem; color: var(--muted); }
+.win-call-ctx .sc-dir { font-weight: 700; }
+.win-call-ctx .sc-dir.buy { color: var(--accent); }
+.win-call-ctx .sc-dir.sell { color: var(--danger); }
+.win-call-ctx .sc-move.pos { color: var(--accent); font-weight: 600; }
+.win-call-ctx .sc-move.neg { color: var(--danger); font-weight: 600; }
+
 .signal-pill {
   display: inline-flex; align-items: center; gap: 7px; font-weight: 700;
   padding: 6px 13px; border-radius: 999px; font-size: 0.9rem;

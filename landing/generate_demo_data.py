@@ -6,6 +6,11 @@ that stock best — plus a lightweight out-of-sample check — and each winner's
 current buy/sell call. The headline signal is the consensus of those calls: a
 strict majority of the windows must agree, otherwise it is reported as mixed.
 
+Alongside each call it stores the latest backtest close and, for a live call,
+the entry price (next open after the signal date) and the return since then, so
+the prototype can show *when* a signal turned and *where* the stock has moved
+since. Prices are the committed daily closes, not real-time quotes.
+
 This keeps the landing page honest: the numbers are produced by the same engine
 the product would use, not invented.
 
@@ -71,6 +76,79 @@ def _latest_date(ticker: str, data_dir: Path) -> pd.Timestamp | None:
         return None
 
 
+def _price_frame(ticker: str, data_dir: Path) -> pd.DataFrame | None:
+    """OHLCV for one ticker, indexed by date, or None when unavailable."""
+    path = Path(data_dir) / f"{ticker}.parquet"
+    if not path.exists():
+        return None
+    try:
+        frame = pd.read_parquet(path)
+    except Exception:
+        return None
+    if isinstance(frame.index, pd.MultiIndex):
+        try:
+            frame = frame.xs(ticker, level="ticker")
+        except KeyError:
+            return None
+    return frame.sort_index()
+
+
+def _scalar(value):
+    """First value of a lookup that may come back as a Series (duplicate index)."""
+    if isinstance(value, (pd.Series, pd.Index, list, tuple)):
+        return value[0] if len(value) else None
+    return value
+
+
+def _signal_context(df: pd.DataFrame | None, date_str: str | None
+                    ) -> tuple[float | None, float | None]:
+    """The price the signal appeared at and the return since.
+
+    The reference is the open of the next trading day after ``date_str``
+    (matching how the trade simulator fills), skipping any bar with a missing
+    quote. When there is no usable bar after the signal — it sits on the last
+    bar in the data, or the tape goes quiet — the signal day's own close is used
+    instead, which is the last price you could have acted on. The return runs
+    from that reference to the most recent close in the data. Both are ``None``
+    when there is no signal date or no price to reference.
+    """
+    if df is None or not date_str:
+        return None, None
+    ts = pd.Timestamp(date_str)
+    entry_price = None
+    for bar in df.index[df.index > ts]:
+        open_ = _scalar(df.loc[bar, "Open"])
+        if pd.notna(open_) and float(open_) > 0:
+            entry_price = float(open_)
+            break
+    if entry_price is None:
+        same = df.index[df.index == ts]
+        if len(same) == 0:
+            return None, None
+        close = _scalar(df.loc[same[0], "Close"])
+        if not pd.notna(close) or float(close) <= 0:
+            return None, None
+        entry_price = float(close)
+    last = df["Close"].dropna()
+    last_close = float(last.iloc[-1]) if len(last) else None
+    if last_close is None or last_close <= 0:
+        return None, None
+    return _num(entry_price, 2), _num(last_close / entry_price - 1.0, 4)
+
+
+def _price_block(df: pd.DataFrame | None) -> dict:
+    """Latest backtest close and the date it belongs to (for the prototype)."""
+    if df is None or df.empty:
+        return {"last": None, "as_of": None}
+    closes = df["Close"].dropna()
+    if closes.empty:
+        return {"last": None, "as_of": None}
+    return {
+        "last": _num(float(closes.iloc[-1]), 2),
+        "as_of": pd.Timestamp(closes.index[-1]).strftime("%Y-%m-%d"),
+    }
+
+
 def _window_start(end: pd.Timestamp, years: int) -> str:
     return (end - pd.DateOffset(years=years)).strftime("%Y-%m-%d")
 
@@ -125,7 +203,8 @@ def _latest_signal(result: dict) -> dict:
 
 
 def _empty_signal() -> dict:
-    return {"direction": None, "agree": 0, "total": 0, "consensus": False, "as_of": None}
+    return {"direction": None, "agree": 0, "total": 0, "consensus": False,
+            "as_of": None, "since": None}
 
 
 def _consensus_signal(calls: dict[str, dict]) -> dict:
@@ -138,6 +217,10 @@ def _consensus_signal(calls: dict[str, dict]) -> dict:
     winning windows. When no window points the same way, ``direction`` is
     ``None`` (a mixed read), ``agree`` is the largest block, and ``as_of`` is the
     most recent call date.
+
+    ``since`` is the date the winning majority aligned: the latest of the
+    agreeing windows' call dates, so the headline call has been in place since
+    at least then. It is ``None`` when there is no consensus.
     """
     total = sum(1 for c in calls.values() if c)
     directions = [c["direction"] for c in calls.values()
@@ -147,12 +230,15 @@ def _consensus_signal(calls: dict[str, dict]) -> dict:
     top_dir, top_n = Counter(directions).most_common(1)[0]
     as_of = max(c["as_of"] for c in calls.values() if c and c.get("as_of"))
     consensus = top_n * 2 > total
+    agreeing = [c["as_of"] for c in calls.values()
+                if c and c.get("direction") == top_dir and c.get("as_of")]
     return {
         "direction": top_dir if consensus else None,
         "agree": top_n,
         "total": total,
         "consensus": consensus,
         "as_of": as_of,
+        "since": max(agreeing) if consensus and agreeing else None,
     }
 
 
@@ -253,8 +339,10 @@ def build_ticker(ticker: str, data_dir: Path, skip_oos: bool, min_trades: int
         print(f"  ! {ticker}: no price data, skipping")
         return None
 
+    df = _price_frame(ticker, data_dir)
     entry: dict = {
         "name": company_name(ticker) or ticker,
+        "price": _price_block(df),
         "signal": _empty_signal(),
         "windows": {},
     }
@@ -276,11 +364,17 @@ def build_ticker(ticker: str, data_dir: Path, skip_oos: bool, min_trades: int
         win_result = results.get(winner, {})
         call = _latest_signal(win_result)
         window_calls[wlabel] = call
+        entry_price, return_pct = _signal_context(df, call["as_of"])
         cell = {
             "strategy": winner,
             "low_confidence": bool(rec.get("low_confidence")),
             "oos": None,
-            "call": {"direction": call["direction"], "as_of": call["as_of"]},
+            "call": {
+                "direction": call["direction"],
+                "as_of": call["as_of"],
+                "entry_price": entry_price,
+                "return_pct": return_pct,
+            },
         }
         cell.update(_metrics(win_result))
         entry["windows"][wlabel] = cell
@@ -299,6 +393,9 @@ def build_ticker(ticker: str, data_dir: Path, skip_oos: bool, min_trades: int
                 cell["oos"] = _oos_pass(ho_metrics)
 
     entry["signal"] = _consensus_signal(window_calls)
+    since_price, since_return = _signal_context(df, entry["signal"].get("since"))
+    entry["signal"]["entry_price"] = since_price
+    entry["signal"]["return_pct"] = since_return
     return entry, trades
 
 
