@@ -113,11 +113,24 @@ class TestConsensusPresentation:
         payload = json.loads(SIGNALS_JSON.read_text(encoding="utf-8"))
         for ticker, entry in payload["tickers"].items():
             sig = entry["signal"]
-            assert set(sig) == {"direction", "agree", "total", "consensus", "as_of"}, ticker
+            assert set(sig) == {
+                "direction", "agree", "total", "consensus", "as_of",
+                "since", "entry_price", "return_pct",
+            }, ticker
             assert sig["consensus"] == (sig["direction"] is not None), ticker
             assert sig["total"] >= sig["agree"] >= 0, ticker
             winners = [c for c in entry["windows"].values() if c.get("strategy")]
             assert sig["total"] == len(winners), ticker
+
+    def test_emitted_price_block_has_a_close(self):
+        if not SIGNALS_JSON.exists():
+            pytest.skip("demo_signals.json not present")
+        payload = json.loads(SIGNALS_JSON.read_text(encoding="utf-8"))
+        for ticker, entry in payload["tickers"].items():
+            price = entry["price"]
+            assert set(price) == {"last", "as_of"}, ticker
+            assert price["last"] > 0, ticker
+            assert price["as_of"], ticker
 
     def test_winning_windows_expose_a_call(self):
         if not SIGNALS_JSON.exists():
@@ -127,6 +140,9 @@ class TestConsensusPresentation:
             for cell in entry["windows"].values():
                 if cell.get("strategy"):
                     assert "call" in cell, ticker
+                    assert set(cell["call"]) == {
+                        "direction", "as_of", "entry_price", "return_pct",
+                    }, ticker
 
 
 class TestDemoJsonIntegrity:
@@ -168,3 +184,27 @@ class TestGlossaryMount:
 
     def test_app_renders_glossary_on_load(self):
         assert "renderGlossary()" in APP_JS
+
+
+class TestPriceContextPresentation:
+    def test_app_fetches_a_live_quote(self):
+        assert "function loadQuote" in APP_JS
+        assert "/api/quote?ticker=" in APP_JS
+        assert "data-quote" in APP_JS
+
+    def test_app_renders_signal_since_context(self):
+        assert "function signalContext" in APP_JS
+        assert "function windowCallContext" in APP_JS
+        assert "since" in APP_JS
+
+    def test_date_only_strings_do_not_shift_by_timezone(self):
+        # as_of/since are "YYYY-MM-DD"; formatting them with new Date() would
+        # render the previous day in negative UTC offsets.
+        assert "function fmtDay" in APP_JS
+        assert "fmtDay(" in APP_JS
+
+    def test_context_styles_exist(self):
+        css = (BASE / "styles.css").read_text(encoding="utf-8")
+        for selector in (".signal-context", ".win-call-ctx", ".quote"):
+            assert selector in css
+

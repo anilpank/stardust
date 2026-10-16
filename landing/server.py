@@ -7,11 +7,18 @@ actually measures:
   (the primary conversion event).
 * ``POST /api/track``  — a funnel/behaviour event (visit, ticker_lookup,
   signal_view, cta_click, return_visit, willingness-to-pay clicks...).
-* ``GET  /api/trades`` — the pre-generated trade-by-trade detail behind a
-  window's winning strategy (read from ``demo_trades.json``, cached in memory).
 
-Both are written to a single SQLite database (``landing.db``) under
-``LANDING_DATA_DIR`` — the only "backend" a short experiment needs. The admin
+It also serves two read-only endpoints off the pre-generated demo data:
+
+* ``GET  /api/trades`` — the trade-by-trade detail behind a window's winning
+  strategy (read from ``demo_trades.json``, cached in memory).
+* ``GET  /api/quote``  — a delayed live quote for one ticker, proxied from
+  Yahoo Finance and cached briefly. The browser can't call Yahoo directly
+  (CORS), and proxying keeps the API keyless and the visitor's IP off Yahoo.
+
+The signup and track events are written to a single SQLite database
+(``landing.db``) under ``LANDING_DATA_DIR`` — the only "backend" a short
+experiment needs. The admin
 console reads the same DB; leads and events can be exported to CSV, and the
 whole database downloaded as a consistent snapshot. No third-party analytics
 required; drop in PostHog/Plausible in ``app.js`` if you want more.
@@ -37,6 +44,9 @@ import secrets
 import sqlite3
 import threading
 import time
+import urllib.error
+import urllib.parse
+import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -50,6 +60,15 @@ SIGNUPS_CSV = DATA_DIR / "signups.csv"
 EVENTS_CSV = DATA_DIR / "events.csv"
 DEMO_JSON = BASE_DIR / "demo_signals.json"
 TRADES_JSON = BASE_DIR / "demo_trades.json"
+
+# Delayed quotes for the prototype, proxied from Yahoo Finance. Results are
+# cached so a burst of lookups on the same ticker hits Yahoo once; failures are
+# cached too (briefly) so a bad symbol can't hammer the upstream API.
+YAHOO_CHART_URL = "https://query1.finance.yahoo.com/v8/finance/chart/{ticker}"
+QUOTE_TTL = 60          # seconds a good quote is reused
+QUOTE_FAIL_TTL = 30     # seconds a failed lookup is remembered
+QUOTE_TIMEOUT = 6       # seconds to wait on Yahoo
+QUOTE_USER_AGENT = "Mozilla/5.0 (compatible; stardust-prototype)"
 
 # HTTP Basic auth for the /admin console. Set a password before deploying:
 #     ADMIN_PASSWORD=...         (local dev; plaintext)
@@ -111,6 +130,9 @@ _init_lock = threading.Lock()
 _initialized: set[str] = set()
 _trades_lock = threading.Lock()
 _trades_cache: dict = {"mtime": None, "payload": None}
+_quote_lock = threading.Lock()
+_quote_cache: dict[str, tuple[float, dict]] = {}  # ticker -> (expires_at, quote)
+_quote_fail_cache: dict[str, float] = {}          # ticker -> retry-after timestamp
 _auth_lock = threading.Lock()
 _auth_failures: dict[str, list[float]] = {}
 
@@ -334,6 +356,84 @@ def trades():
             "windows": entries.get(ticker, {}),
         }
     )
+
+
+# --------------------------------------------------------------------------- #
+# Live quote — a thin, cached proxy for the prototype's "current price" chip.
+# --------------------------------------------------------------------------- #
+def _fetch_quote(ticker: str) -> dict | None:
+    """Fetch one ticker's latest price from Yahoo Finance (None on any failure).
+
+    Returns a small, JSON-safe dict. Never raises: the landing page degrades to
+    hiding the chip when a quote is unavailable.
+    """
+    url = YAHOO_CHART_URL.format(ticker=urllib.parse.quote(ticker)) + "?range=1d&interval=1m"
+    request_ = urllib.request.Request(url, headers={"User-Agent": QUOTE_USER_AGENT})
+    try:
+        with urllib.request.urlopen(request_, timeout=QUOTE_TIMEOUT) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+    except (urllib.error.URLError, TimeoutError, OSError, ValueError):
+        return None
+
+    results = (payload.get("chart") or {}).get("result")
+    if not results:
+        return None
+    meta = results[0].get("meta") or {}
+    price = meta.get("regularMarketPrice")
+    if not isinstance(price, (int, float)):
+        return None
+    previous = meta.get("chartPreviousClose")
+    if not isinstance(previous, (int, float)):
+        previous = meta.get("previousClose")
+    change = round(price - previous, 4) if isinstance(previous, (int, float)) else None
+    change_pct = round(change / previous, 6) if change is not None and previous else None
+    market_time = meta.get("regularMarketTime")
+    as_of = (
+        datetime.fromtimestamp(market_time, tz=timezone.utc).isoformat(timespec="seconds")
+        if isinstance(market_time, (int, float)) else None
+    )
+    return {
+        "ticker": meta.get("symbol") or ticker,
+        "price": price,
+        "previous_close": previous,
+        "change": change,
+        "change_pct": change_pct,
+        "currency": meta.get("currency"),
+        "exchange": meta.get("exchangeName"),
+        "as_of": as_of,
+    }
+
+
+def _cached_quote(ticker: str):
+    """Return (quote, error). Good and failed results are both cached briefly."""
+    now = time.time()
+    with _quote_lock:
+        entry = _quote_cache.get(ticker)
+        if entry and entry[0] > now:
+            return entry[1], None
+        retry_after = _quote_fail_cache.get(ticker)
+        if retry_after and retry_after > now:
+            return None, "unavailable"
+
+    quote = _fetch_quote(ticker)
+    with _quote_lock:
+        if quote is None:
+            _quote_fail_cache[ticker] = now + QUOTE_FAIL_TTL
+            return None, "unavailable"
+        _quote_cache[ticker] = (now + QUOTE_TTL, quote)
+        _quote_fail_cache.pop(ticker, None)
+    return quote, None
+
+
+@app.get("/api/quote")
+def quote():
+    ticker = request.args.get("ticker", "").strip().upper()
+    if not _TICKER_RE.match(ticker):
+        return jsonify({"ok": False, "error": "Please enter a valid ticker."}), 400
+    result, error = _cached_quote(ticker)
+    if error:
+        return jsonify({"ok": False, "error": error, "ticker": ticker}), 502
+    return jsonify({"ok": True, "ticker": ticker, "quote": result})
 
 
 # --------------------------------------------------------------------------- #

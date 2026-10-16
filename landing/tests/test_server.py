@@ -299,6 +299,135 @@ class TestLoadTrades:
         assert server._load_trades() is first
 
 
+class TestQuoteEndpoint:
+    GOOD = {
+        "ticker": "AAPL", "price": 175.5, "previous_close": 174.0,
+        "change": 1.5, "change_pct": 0.008621, "currency": "USD",
+        "exchange": "NasdaqGS", "as_of": "2026-10-15T20:00:00+00:00",
+    }
+
+    @pytest.fixture(autouse=True)
+    def clear_quote_cache(self, monkeypatch):
+        monkeypatch.setattr(server, "_quote_cache", {})
+        monkeypatch.setattr(server, "_quote_fail_cache", {})
+
+    def test_invalid_ticker_is_rejected_without_calling_yahoo(self, client, monkeypatch):
+        called = []
+        monkeypatch.setattr(server, "_fetch_quote", lambda t: called.append(t) or None)
+        resp = client.get("/api/quote?ticker=%3Cscript%3E")
+        assert resp.status_code == 400
+        assert resp.get_json()["ok"] is False
+        assert called == []
+
+    def test_valid_ticker_returns_a_quote(self, client, monkeypatch):
+        monkeypatch.setattr(server, "_fetch_quote", lambda t: dict(self.GOOD))
+        resp = client.get("/api/quote?ticker=aapl")
+        assert resp.status_code == 200
+        body = resp.get_json()
+        assert body["ok"] is True
+        assert body["ticker"] == "AAPL"
+        assert body["quote"]["price"] == 175.5
+
+    def test_upstream_failure_is_a_502(self, client, monkeypatch):
+        monkeypatch.setattr(server, "_fetch_quote", lambda t: None)
+        resp = client.get("/api/quote?ticker=AAPL")
+        assert resp.status_code == 502
+        assert resp.get_json()["ok"] is False
+
+    def test_result_is_cached_between_requests(self, client, monkeypatch):
+        calls = []
+        monkeypatch.setattr(server, "_fetch_quote", lambda t: calls.append(t) or dict(self.GOOD))
+        client.get("/api/quote?ticker=AAPL")
+        client.get("/api/quote?ticker=AAPL")
+        assert calls == ["AAPL"]
+
+    def test_failures_are_cached_briefly(self, client, monkeypatch):
+        calls = []
+        monkeypatch.setattr(server, "_fetch_quote", lambda t: calls.append(t) or None)
+        client.get("/api/quote?ticker=AAPL")
+        client.get("/api/quote?ticker=AAPL")
+        assert calls == ["AAPL"]
+
+    def test_a_later_success_clears_the_failure_cache(self, client, monkeypatch):
+        healthy = {"state": False}
+
+        def fetch(t):
+            return dict(self.GOOD) if healthy["state"] else None
+
+        monkeypatch.setattr(server, "_fetch_quote", fetch)
+        assert client.get("/api/quote?ticker=AAPL").status_code == 502
+        healthy["state"] = True
+        server._quote_fail_cache.clear()  # simulate the 30s failure window elapsing
+        body = client.get("/api/quote?ticker=AAPL").get_json()
+        assert body["ok"] is True
+        assert "AAPL" not in server._quote_fail_cache
+
+
+class TestFetchQuote:
+    def _response(self, monkeypatch, payload):
+        class FakeResp:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+            def read(self):
+                return json.dumps(payload).encode("utf-8")
+
+        monkeypatch.setattr(server.urllib.request, "urlopen", lambda *a, **k: FakeResp())
+
+    def test_parses_price_and_change(self, monkeypatch):
+        self._response(monkeypatch, {"chart": {"result": [{"meta": {
+            "symbol": "AAPL", "regularMarketPrice": 180.0, "chartPreviousClose": 175.0,
+            "currency": "USD", "exchangeName": "NasdaqGS", "regularMarketTime": 1_700_000_000,
+        }}]}})
+        quote = server._fetch_quote("AAPL")
+        assert quote["price"] == 180.0
+        assert quote["previous_close"] == 175.0
+        assert quote["change"] == 5.0
+        assert quote["change_pct"] == pytest.approx(5.0 / 175.0, abs=1e-6)
+        assert quote["as_of"].startswith("2023-11-14T")
+
+    def test_empty_result_is_none(self, monkeypatch):
+        self._response(monkeypatch, {"chart": {"result": None}})
+        assert server._fetch_quote("AAPL") is None
+
+    def test_missing_price_is_none(self, monkeypatch):
+        self._response(monkeypatch, {"chart": {"result": [{"meta": {"symbol": "AAPL"}}]}})
+        assert server._fetch_quote("AAPL") is None
+
+    def test_network_error_is_none(self, monkeypatch):
+        def boom(*a, **k):
+            raise server.urllib.error.URLError("no network")
+
+        monkeypatch.setattr(server.urllib.request, "urlopen", boom)
+        assert server._fetch_quote("AAPL") is None
+
+    def test_malformed_json_is_none(self, monkeypatch):
+        class FakeResp:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+            def read(self):
+                return b"{not valid json"
+
+        monkeypatch.setattr(server.urllib.request, "urlopen", lambda *a, **k: FakeResp())
+        assert server._fetch_quote("AAPL") is None
+
+    def test_falls_back_to_previous_close(self, monkeypatch):
+        self._response(monkeypatch, {"chart": {"result": [{"meta": {
+            "symbol": "AAPL", "regularMarketPrice": 180.0, "previousClose": 175.0,
+        }}]}})
+        quote = server._fetch_quote("AAPL")
+        assert quote["previous_close"] == 175.0
+        assert quote["change"] == 5.0
+        assert quote["change_pct"] == pytest.approx(5.0 / 175.0, abs=1e-6)
+
+
 class TestSignup:
     def test_valid_signup_writes_row(self, client):
         resp = client.post("/api/signup", json={
