@@ -105,6 +105,27 @@ class TestDemoJsonIntegrity:
             json.dumps(payload, allow_nan=False)
 
 
+class TestSignupOpensPrototype:
+    def _success_path(self) -> str:
+        return APP_JS.split('track("email_submit"', 1)[1].split(".catch(", 1)[0]
+
+    def test_signup_opens_the_ticker_detail(self):
+        # The detail must open on every successful signup (not just the first
+        # unlock), so the lookup can't live inside the signalsUnlocked() gate.
+        assert "lookup(reveal)" in self._success_path()
+        assert "#demo-ticker" in self._success_path()
+
+    def test_signup_jumps_to_the_prototype(self):
+        assert "function jumpToPrototype" in APP_JS
+        assert "jumpToPrototype(" in self._success_path()
+        assert 'scrollIntoView({ behavior: "smooth", block: "start" })' in APP_JS
+
+    def test_no_ticker_focuses_the_prototype_input(self):
+        # With no ticker there's no detail to open, so land on the prototype and
+        # focus its input instead.
+        assert "jumpToPrototype(!reveal)" in self._success_path()
+
+
 class TestGlossaryMount:
     def test_index_has_glossary_mount(self):
         assert 'id="glossary-body"' in (BASE / "index.html").read_text(encoding="utf-8")

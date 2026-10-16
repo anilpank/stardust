@@ -658,16 +658,30 @@
         if (!signalsUnlocked()) {
           unlockSignals();
           track("signal_unlock", { ticker: ticker });
-          var reveal = ticker || pendingTicker || lastTicker;
-          pendingTicker = "";
-          if (reveal) lookup(reveal);  // re-render the demo with the live call now visible
+        }
+        var reveal = ticker || pendingTicker || lastTicker;
+        pendingTicker = "";
+        if (reveal) {
+          var demoTicker = $("#demo-ticker");
+          if (demoTicker) demoTicker.value = reveal;
+          lookup(reveal);  // open the prototype detail for this ticker
         }
         showSuccess(form, ticker);
+        setTimeout(function () { jumpToPrototype(!reveal); }, 1000);
       })
       .catch(function (err) {
         if (msg) { msg.textContent = err.message || "Something went wrong. Try again."; msg.className = "microcopy error"; }
         if (btn) { btn.disabled = false; btn.textContent = "Try again →"; }
       });
+  }
+
+  function jumpToPrototype(focusTicker) {
+    var demo = document.getElementById("demo");
+    if (!demo) return;
+    demo.scrollIntoView({ behavior: "smooth", block: "start" });
+    if (!focusTicker) return;
+    var input = $("#demo-ticker");
+    if (input) setTimeout(function () { input.focus({ preventScroll: true }); }, 450);
   }
 
   function showSuccess(form, ticker) {
