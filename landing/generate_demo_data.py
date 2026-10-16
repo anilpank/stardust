@@ -95,7 +95,9 @@ def _price_frame(ticker: str, data_dir: Path) -> pd.DataFrame | None:
 
 def _scalar(value):
     """First value of a lookup that may come back as a Series (duplicate index)."""
-    if isinstance(value, (pd.Series, pd.Index, list, tuple)):
+    if isinstance(value, pd.Series):
+        return value.iloc[0] if len(value) else None
+    if isinstance(value, (pd.Index, list, tuple)):
         return value[0] if len(value) else None
     return value
 

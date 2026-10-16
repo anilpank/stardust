@@ -348,6 +348,20 @@ class TestQuoteEndpoint:
         client.get("/api/quote?ticker=AAPL")
         assert calls == ["AAPL"]
 
+    def test_a_later_success_clears_the_failure_cache(self, client, monkeypatch):
+        healthy = {"state": False}
+
+        def fetch(t):
+            return dict(self.GOOD) if healthy["state"] else None
+
+        monkeypatch.setattr(server, "_fetch_quote", fetch)
+        assert client.get("/api/quote?ticker=AAPL").status_code == 502
+        healthy["state"] = True
+        server._quote_fail_cache.clear()  # simulate the 30s failure window elapsing
+        body = client.get("/api/quote?ticker=AAPL").get_json()
+        assert body["ok"] is True
+        assert "AAPL" not in server._quote_fail_cache
+
 
 class TestFetchQuote:
     def _response(self, monkeypatch, payload):
@@ -389,6 +403,29 @@ class TestFetchQuote:
 
         monkeypatch.setattr(server.urllib.request, "urlopen", boom)
         assert server._fetch_quote("AAPL") is None
+
+    def test_malformed_json_is_none(self, monkeypatch):
+        class FakeResp:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+            def read(self):
+                return b"{not valid json"
+
+        monkeypatch.setattr(server.urllib.request, "urlopen", lambda *a, **k: FakeResp())
+        assert server._fetch_quote("AAPL") is None
+
+    def test_falls_back_to_previous_close(self, monkeypatch):
+        self._response(monkeypatch, {"chart": {"result": [{"meta": {
+            "symbol": "AAPL", "regularMarketPrice": 180.0, "previousClose": 175.0,
+        }}]}})
+        quote = server._fetch_quote("AAPL")
+        assert quote["previous_close"] == 175.0
+        assert quote["change"] == 5.0
+        assert quote["change_pct"] == pytest.approx(5.0 / 175.0, abs=1e-6)
 
 
 class TestSignup:

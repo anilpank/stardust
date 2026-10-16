@@ -243,6 +243,21 @@ class TestPriceFrame:
         df = gen._price_frame("AAPL", tmp_path)
         assert list(df.index.strftime("%Y-%m-%d")) == ["2026-01-02", "2026-01-03"]
 
+    def test_selects_a_ticker_from_a_multiindex_frame(self, tmp_path):
+        dates = pd.DatetimeIndex(["2026-01-02", "2026-01-03"], name="Date")
+        idx = pd.MultiIndex.from_product([["AAPL", "MSFT"], dates],
+                                         names=["ticker", "Date"])
+        df = pd.DataFrame(
+            {"Open": [1.0, 2.0, 3.0, 4.0], "High": [1.0, 2.0, 3.0, 4.0],
+             "Low": [1.0, 2.0, 3.0, 4.0], "Close": [1.0, 2.0, 3.0, 4.0],
+             "Volume": [1, 1, 1, 1]},
+            index=idx,
+        )
+        df.to_parquet(tmp_path / "AAPL.parquet")
+        out = gen._price_frame("AAPL", tmp_path)
+        assert list(out.index.strftime("%Y-%m-%d")) == ["2026-01-02", "2026-01-03"]
+        assert out["Close"].iloc[0] == 1.0
+
 
 class TestSignalContext:
     def test_entry_is_next_open_and_return_to_last_close(self):
@@ -300,6 +315,16 @@ class TestSignalContext:
         ])
         assert gen._signal_context(df, "2026-01-02") == (None, None)
 
+    def test_duplicate_index_labels_use_the_first_match(self):
+        base = _frame([
+            ("2026-01-02", 10.0, 11.0, 9.0, 10.0),
+            ("2026-01-05", 12.0, 13.0, 11.0, 15.0),
+        ])
+        df = pd.concat([base, base])  # duplicate index labels
+        entry, ret = gen._signal_context(df, "2026-01-02")
+        assert entry == 12.0
+        assert ret == pytest.approx(15.0 / 12.0 - 1.0, abs=1e-4)
+
 
 class TestPriceBlock:
     def test_reports_latest_close(self):
@@ -325,10 +350,17 @@ class TestBuildIntegration:
 
         assert payload["oos_definition"]
         assert entry["name"]
+        assert entry["price"]["last"] > 0
+        assert entry["price"]["as_of"]
         sig = entry["signal"]
+        assert set(sig) == {"direction", "agree", "total", "consensus", "as_of",
+                            "since", "entry_price", "return_pct"}
         assert sig["direction"] in {"BUY", "SELL", "HOLD", None}
         assert sig["total"] >= sig["agree"] >= 0
         assert sig["consensus"] == (sig["direction"] is not None)
+        if sig["consensus"]:
+            assert sig["since"] and sig["entry_price"] is not None
+            assert sig["return_pct"] is not None
         # every window is present; each either has a winner or is explicitly empty
         for w in gen.WINDOWS:
             cell = entry["windows"][w]
@@ -336,7 +368,12 @@ class TestBuildIntegration:
             if cell["strategy"]:
                 assert "win_rate" in cell and "trades_completed" in cell
                 assert "call" in cell
-                assert cell["call"]["direction"] in {"BUY", "SELL", "HOLD"}
+                call = cell["call"]
+                assert set(call) == {"direction", "as_of", "entry_price", "return_pct"}
+                assert call["direction"] in {"BUY", "SELL", "HOLD"}
+                if call["direction"] in ("BUY", "SELL"):
+                    assert call["entry_price"] is not None
+                    assert call["return_pct"] is not None
 
         # trades file mirrors the signals file, with positional rows
         assert trades_payload["columns"] == gen.TRADE_COLUMNS
@@ -344,6 +381,88 @@ class TestBuildIntegration:
         for rows in trades_payload["trades"]["AAPL"].values():
             assert rows
             assert all(len(row) == len(gen.TRADE_COLUMNS) for row in rows)
+
+
+class TestBuildTickerPriceContext:
+    """End-to-end wiring of build_ticker with the engine stubbed out (fast)."""
+
+    ROWS = [
+        ("2026-01-02", 10.0, 11.0, 9.0, 10.0),
+        ("2026-01-05", 12.0, 13.0, 11.0, 12.5),
+        ("2026-01-06", 13.0, 14.0, 12.0, 15.0),
+    ]
+
+    def _stub_engine(self, monkeypatch, winners, directions):
+        def fake_analyze(ticker, start, end, universe="current",
+                         data_dir=None, strategy_labels=None):
+            results = {}
+            for name in set(winners):
+                results[name] = {
+                    "strategy_name": name,
+                    "signals": [SignalEvent(
+                        timestamp=datetime(2026, 1, 2), ticker=ticker,
+                        direction=directions[name], strength=0.8, strategy_id=name)],
+                    "metrics": {"win_rate": 0.6, "total_return": 5.0, "cagr": 0.1,
+                                "sharpe": 1.0, "trades_completed": 4},
+                    "trades": [],
+                }
+            return results
+
+        picks = list(winners)
+
+        def fake_recommend(summary, min_trades=3):
+            return {"strategy": picks.pop(0), "low_confidence": False}
+
+        monkeypatch.setattr(gen, "analyze_company", fake_analyze)
+        monkeypatch.setattr(gen, "company_summary_frame", lambda results: object())
+        monkeypatch.setattr(gen, "recommend_strategy", fake_recommend)
+        monkeypatch.setattr(gen, "company_name", lambda t: "Test Corp")
+
+    def _build(self, tmp_path, monkeypatch, winners, directions):
+        _frame(self.ROWS).to_parquet(tmp_path / "AAPL.parquet")
+        self._stub_engine(monkeypatch, winners, directions)
+        entry, _ = gen.build_ticker("AAPL", tmp_path, skip_oos=True, min_trades=3)
+        return entry
+
+    def test_consensus_call_carries_since_price_and_return(self, tmp_path, monkeypatch):
+        entry = self._build(
+            tmp_path, monkeypatch,
+            winners=["MA 50/200"] * len(gen.WINDOWS),
+            directions={"MA 50/200": SignalDirection.BUY},
+        )
+
+        assert entry["price"] == {"last": 15.0, "as_of": "2026-01-06"}
+        sig = entry["signal"]
+        assert sig["direction"] == "BUY" and sig["consensus"] is True
+        assert sig["since"] == "2026-01-02"
+        assert sig["entry_price"] == 12.0              # next open after the signal
+        assert sig["return_pct"] == pytest.approx(0.25, abs=1e-4)
+
+        for w in gen.WINDOWS:
+            call = entry["windows"][w]["call"]
+            assert set(call) == {"direction", "as_of", "entry_price", "return_pct"}
+            assert call["direction"] == "BUY"
+            assert call["entry_price"] == 12.0
+            assert call["return_pct"] == pytest.approx(0.25, abs=1e-4)
+
+    def test_disagreeing_windows_are_mixed_without_a_price(self, tmp_path, monkeypatch):
+        entry = self._build(
+            tmp_path, monkeypatch,
+            winners=["MA 50/200", "RSI 14", "Donchian 20/10", "Dual Mom 126d"],
+            directions={
+                "MA 50/200": SignalDirection.BUY,
+                "RSI 14": SignalDirection.SELL,
+                "Donchian 20/10": SignalDirection.BUY,
+                "Dual Mom 126d": SignalDirection.SELL,
+            },
+        )
+
+        sig = entry["signal"]
+        assert sig["direction"] is None and sig["consensus"] is False
+        assert sig["since"] is None
+        assert sig["entry_price"] is None and sig["return_pct"] is None
+        assert set(sig) == {"direction", "agree", "total", "consensus", "as_of",
+                            "since", "entry_price", "return_pct"}
 
 
 class TestTrades:
