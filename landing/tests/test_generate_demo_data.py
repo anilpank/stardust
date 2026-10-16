@@ -279,6 +279,55 @@ class TestEmptyTradesPayload:
         assert datetime.fromisoformat(payload["generated_at"])
 
 
+class TestSignalBreakdown:
+    def _entry(self, **signal):
+        return {"signal": signal}
+
+    def test_tallies_each_bucket(self):
+        tickers = {
+            "A": self._entry(direction="BUY", total=2, consensus=True),
+            "B": self._entry(direction="SELL", total=2, consensus=True),
+            "C": self._entry(direction=None, total=2, consensus=False),
+            "D": self._entry(direction=None, total=0, consensus=False),
+        }
+        counts = gen._signal_breakdown(tickers)
+        assert counts["BUY"] == 1
+        assert counts["SELL"] == 1
+        assert counts["Mixed"] == 1
+        assert counts["No signal"] == 1
+
+    def test_empty_is_all_zero(self):
+        counts = gen._signal_breakdown({})
+        assert set(counts.values()) == {0}
+
+
+class TestFormatSummary:
+    def test_reports_counts_signals_and_files(self, tmp_path):
+        out = tmp_path / "demo_signals.json"
+        out.write_text("{}")
+        trd = tmp_path / "demo_trades.json"
+        trd.write_text("{}")
+        payload = {"tickers": {"A": {"signal": {"direction": "BUY", "total": 1, "consensus": True}}}}
+        summary = gen.format_summary(payload, {"trades": {"A": {}}}, [], 90, out, trd, True)
+        assert "Done in 1:30" in summary
+        assert "BUY 1" in summary
+        assert "demo_signals.json" in summary and "demo_trades.json" in summary
+
+    def test_omits_trades_line_when_skipped(self, tmp_path):
+        out = tmp_path / "s.json"
+        out.write_text("{}")
+        summary = gen.format_summary({"tickers": {}}, {}, [], 5, out, tmp_path / "t.json", False)
+        assert "Wrote s.json" in summary
+        assert "t.json" not in summary
+
+    def test_notes_failed_count(self, tmp_path):
+        out = tmp_path / "s.json"
+        out.write_text("{}")
+        summary = gen.format_summary({"tickers": {}}, {}, [gen.TickerFailure("BAD", "x")],
+                                     5, out, tmp_path / "t.json", False)
+        assert "1 failed" in summary
+
+
 def _fake_entry(ticker: str) -> dict:
     return {
         "name": f"{ticker} Inc.",
@@ -415,6 +464,15 @@ class TestMain:
         assert list(json.loads(sig.read_text())["tickers"]) == ["KO", "AAPL", "NVDA"]
         assert list(json.loads(trd.read_text())["trades"]) == ["KO", "AAPL", "NVDA"]
         assert set(stub) == {"KO", "AAPL", "NVDA"}
+
+    def test_main_prints_progress_and_summary(self, tmp_path, stub, capsys):
+        sig, trd = tmp_path / "s.json", tmp_path / "t.json"
+        gen.main(["--tickers", "AAPL", "NVDA", "--output", str(sig),
+                  "--trades-output", str(trd), "--skip-oos"])
+        out = capsys.readouterr().out
+        assert "Done in" in out
+        assert "Signals:" in out
+        assert "2/2" in out
 
 
 class TestProcessAll:

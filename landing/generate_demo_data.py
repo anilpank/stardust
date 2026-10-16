@@ -35,6 +35,7 @@ from thermaltrend.company_universe import (
     recommend_strategy,
     trades_to_frame,
 )
+from thermaltrend.progress import Progress, format_duration, human_size
 from thermaltrend.ticker_search import company_name
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -191,6 +192,44 @@ def _empty_trades_payload() -> dict:
         "columns": TRADE_COLUMNS,
         "trades": {},
     }
+
+
+def _signal_breakdown(tickers: dict) -> dict:
+    """Tally the headline signal across entries for the end-of-run summary."""
+    counts = {"BUY": 0, "SELL": 0, "HOLD": 0, "Mixed": 0, "No signal": 0}
+    for entry in tickers.values():
+        sig = entry.get("signal") or {}
+        total = sig.get("total") or 0
+        direction = str(sig.get("direction") or "").upper()
+        if not total:
+            counts["No signal"] += 1
+        elif sig.get("consensus") and direction:
+            counts[direction if direction in counts else "HOLD"] += 1
+        else:
+            counts["Mixed"] += 1
+    return counts
+
+
+def format_summary(signals_payload: dict, trades_payload: dict, failed: list,
+                   elapsed: float, out: Path, trades_out: Path, wrote_trades: bool) -> str:
+    """Build the end-of-run summary block shown on the command line."""
+    tickers = signals_payload.get("tickers", {})
+    b = _signal_breakdown(tickers)
+    built = f"  {'Tickers:':<13}{len(tickers)} built"
+    if failed:
+        built += f", {len(failed)} failed"
+    lines = [
+        f"Done in {format_duration(elapsed)}",
+        built,
+        f"  {'Signals:':<13}BUY {b['BUY']}, SELL {b['SELL']}, HOLD {b['HOLD']}, "
+        f"Mixed {b['Mixed']}, No signal {b['No signal']}",
+    ]
+    if out.exists():
+        lines.append(f"  Wrote {out.name}  ({len(tickers)} tickers, {human_size(out.stat().st_size)})")
+    if wrote_trades and trades_out.exists():
+        n = len(trades_payload.get("trades", {}))
+        lines.append(f"  Wrote {trades_out.name}  ({n} tickers, {human_size(trades_out.stat().st_size)})")
+    return "\n".join(lines)
 
 
 def _trades(result: dict) -> list[list]:
@@ -386,6 +425,7 @@ def main(argv: list[str] | None = None) -> None:
     if args.workers > 1:
         print(f"Using {args.workers} worker processes")
 
+    progress = Progress(len(pending), label="Building", inline=False)
     done = 0
     failures: list[TickerFailure] = []
 
@@ -400,9 +440,11 @@ def main(argv: list[str] | None = None) -> None:
             if not args.skip_trades:
                 trades_payload["trades"][ticker] = trades
         checkpoint()
-        print(f"    [{done}/{len(pending)}] {len(payload['tickers'])} tickers written")
+        progress.update(done)
+        progress.log(progress.line(f"{ticker}  ({len(payload['tickers'])} total)"))
 
     _process_all(pending, data_dir, args.skip_oos, args.min_trades, args.workers, on_result)
+    progress.close()
 
     if failures:
         print(f"\n!! {len(failures)} ticker(s) FAILED — {out.name} is INCOMPLETE "
@@ -412,9 +454,8 @@ def main(argv: list[str] | None = None) -> None:
         print("Do not commit this file; fix the failures or re-run.", file=sys.stderr)
         raise SystemExit(1)
 
-    print(f"\nWrote {out}  ({len(payload['tickers'])} tickers)")
-    if not args.skip_trades:
-        print(f"Wrote {trades_out}  ({len(trades_payload['trades'])} tickers)")
+    print(format_summary(payload, trades_payload, failures, progress.elapsed,
+                         out, trades_out, not args.skip_trades))
 
 
 if __name__ == "__main__":
