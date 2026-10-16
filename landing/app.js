@@ -128,61 +128,69 @@
   var STRATEGY_INFO = {
     "MA 50/200": {
       kind: "Trend-following",
-      blurb: "Buys when the 50-day moving average crosses above the 200-day one (a " +
-        "“golden cross”) and sells on the reverse (“death cross”) — the textbook " +
-        "long-term trend rule.",
+      blurb: "Follows the long-term trend using two moving averages. It buys when the " +
+        "50-day average price rises above the 200-day average, and sells when it drops " +
+        "back below.",
+      example: "In plain terms: stay invested while the last two months are stronger " +
+        "than the last ten, and step aside once the trend rolls over.",
     },
     "Donchian 20/10": {
       kind: "Breakout",
-      blurb: "Buys when price breaks out to a new 20-day high and exits when it " +
-        "falls to a 10-day low. It’s the classic trading-channel breakout, made " +
-        "famous by the original Turtles.",
+      blurb: "Buys strength. It enters when the price hits a new 20-day high, and exits " +
+        "when it later falls to a 10-day low.",
+      example: "If a stock reaches its highest price in about a month it buys in; if it " +
+        "then slips to its lowest price in about two weeks, it sells.",
     },
     "RSI 14": {
       kind: "Mean-reversion",
-      blurb: "Buys when the 14-day RSI climbs back up out of oversold territory " +
-        "(below 30) and sells when it drops back from overbought (above 70). It " +
-        "bets that sharp moves snap back.",
+      blurb: "Bets that sharp drops snap back. It buys when the stock looks oversold and " +
+        "sells when it looks overheated.",
+      example: "It buys after selling has been unusually heavy for a couple of weeks and " +
+        "the price starts to recover, then sells into the bounce.",
     },
     "ATR Trail 20/14/3": {
       kind: "Volatility stop",
-      blurb: "Enters on a 20-day breakout, then rides the move with a trailing stop " +
-        "3× ATR(14) below the highest high since entry. The stop only ratchets up, " +
-        "so it protects gains as the trend runs.",
+      blurb: "Rides a trend with a safety net. It enters on a 20-day breakout, then trails " +
+        "a stop a set distance below the highest price reached, so it locks in gains as " +
+        "the trade runs.",
+      example: "It only sells once the price falls far enough below its recent peak, " +
+        "which gives a winning trade room to breathe.",
     },
     "Dual Mom 126d": {
       kind: "Dual momentum",
-      blurb: "Buys when the stock’s 6-month (126-day) return is positive AND better " +
-        "than the S&P 500’s; sells when either condition fails. It combines absolute " +
-        "and relative momentum.",
+      blurb: "Buys only when the stock is up over the last six months and beating the " +
+        "S&P 500 over the same stretch. It sells when either of those stops being true.",
+      example: "A stock up 20% over six months while the index is up 10% stays in; one " +
+        "that lags the index gets dropped.",
     },
     "Factor 126d": {
       kind: "Factor scoring",
-      blurb: "Blends momentum, low volatility, trend and short-term reversal into a " +
-        "single 0–1 score, and holds while the score is strong and improving — a " +
-        "rules-based multi-factor model.",
+      blurb: "Rates each stock on momentum, low volatility, trend and short-term reversal, " +
+        "then holds while that combined score stays strong and improving.",
+      example: "Instead of one rule, it checks several boxes and only stays invested while " +
+        "the overall picture keeps getting better.",
     },
   };
   var OOS_INFO = {
     "true": {
       label: "Held up out-of-sample",
       tone: "good",
-      blurb: "The winning strategy was re-tested on a slice of recent data it was " +
-        "never tuned on — and it still made money with a ≥50% win rate. That’s the " +
-        "good sign: the edge looks real, not just curve-fit to the past.",
+      blurb: "The winner was re-tested on a slice of recent data it was never tuned on, " +
+        "and it still made money with a win rate of at least 50%. That's the good sign: " +
+        "the edge looks real, not curve-fit.",
     },
     "false": {
       label: "Likely overfit",
       tone: "bad",
-      blurb: "On held-out data the strategy’s edge disappeared (a negative return or " +
-        "a <50% win rate). That’s the classic warning sign: great in the backtest, " +
-        "unreliable in live trading, because it was tuned to the past.",
+      blurb: "On the held-out data the edge disappeared (a negative return or a win rate " +
+        "below 50%). That's the classic warning sign: great in the backtest, unreliable " +
+        "in real trading, because it was tuned to the past.",
     },
     "null": {
       label: "Out-of-sample check unavailable",
       tone: "",
-      blurb: "There wasn’t enough recent data to re-test this window, so no " +
-        "out-of-sample judgement is made either way.",
+      blurb: "There wasn't enough recent data to re-test this window, so we don't make " +
+        "an out-of-sample judgement either way.",
     },
   };
 
@@ -453,8 +461,8 @@
     }).join("");
 
     var about = info
-      ? '<p class="about"><strong>' + esc(c.strategy) + '</strong> — ' + esc(info.kind) +
-        ': ' + esc(info.blurb) + '</p>'
+      ? '<p class="about"><strong>' + esc(c.strategy) + '</strong> (' + esc(info.kind) +
+        '): ' + esc(info.blurb) + '</p>'
       : '';
     var oosNote = '<p class="about oos-note ' + esc(oosInfo.tone) + '"><strong>' +
       esc(oosInfo.label) + '.</strong> ' + esc(oosInfo.blurb) + '</p>';
@@ -472,7 +480,7 @@
       '</button>' +
       '<div class="win-detail" hidden>' +
         '<dl class="win-stats">' + stats + '</dl>' +
-        (c.low_confidence ? '<p class="note warn">Low confidence — few trades.</p>' : '') +
+        (c.low_confidence ? '<p class="note warn">Low confidence: few trades.</p>' : '') +
         about +
         oosNote +
         '<div class="win-trades" data-trades="' + esc(wlabel) + '"></div>' +
@@ -486,7 +494,7 @@
     if (!t) {
       demoResult.innerHTML =
         '<p class="note warn">We don’t have a cached report for <strong>' + esc(resp.ticker) +
-        '</strong> yet — coverage is expanding. Enter your email below and we’ll send this ticker’s ' +
+        '</strong> yet. Coverage is expanding. Enter your email below and we’ll send this ticker’s ' +
         'report as soon as it’s ready.</p>';
       return;
     }
@@ -500,7 +508,7 @@
       html += consensusPill(sig);
     } else {
       html += '<button type="button" class="signal-pill signal-locked" data-unlock="' +
-              esc(resp.ticker) + '">🔒 Live signal — unlock by email</button>';
+              esc(resp.ticker) + '">🔒 Live signal. Unlock by email</button>';
     }
     var asOf = fmtDate(resp.generated_at);
     if (asOf) {
@@ -689,10 +697,10 @@
     wrap.className = "success-block";
     wrap.innerHTML =
       '<p class="microcopy success">✓ You’re in. ' +
-      (ticker ? 'We’ll email the current signal for <strong>' + esc(ticker) + '</strong> — and alert you when it flips.' :
-                'We’ll email your ticker’s current signal — and alert you when it flips.') +
+      (ticker ? 'We’ll email the current signal for <strong>' + esc(ticker) + '</strong>, and alert you when it flips.' :
+                'We’ll email your ticker’s current signal, and alert you when it flips.') +
       '</p>' +
-      '<p class="note">Help us shape the paid version — would you pay for daily signals?</p>' +
+      '<p class="note">Help us shape the paid version. Would you pay for daily signals?</p>' +
       '<div class="quickpicks">' +
       '<button type="button" class="chip" data-wtp="yes">Yes, ~$19/mo</button>' +
       '<button type="button" class="chip" data-wtp="maybe">Maybe</button>' +
@@ -703,7 +711,7 @@
       b.addEventListener("click", function () {
         track("wtp_" + b.getAttribute("data-wtp"), { ticker: ticker });
         wrap.querySelectorAll("[data-wtp]").forEach(function (x) { x.disabled = true; });
-        b.textContent = "Thanks — noted.";
+        b.textContent = "Thanks, noted.";
       });
     });
   }
@@ -724,7 +732,8 @@
     var strategies = Object.keys(STRATEGY_INFO).map(function (label) {
       var i = STRATEGY_INFO[label];
       return '<div class="gloss-item"><h4>' + esc(label) +
-        ' <span class="gloss-kind">' + esc(i.kind) + "</span></h4><p>" + esc(i.blurb) + "</p></div>";
+        ' <span class="gloss-kind">' + esc(i.kind) + "</span></h4><p>" + esc(i.blurb) + "</p>" +
+        (i.example ? '<p class="gloss-example">' + esc(i.example) + "</p>" : "") + "</div>";
     }).join("");
     var badges = ["true", "false", "null"].map(function (key) {
       var i = OOS_INFO[key];
@@ -736,7 +745,7 @@
       '<h4 class="gloss-head">The honesty badge</h4>' +
       '<div class="gloss-grid">' + badges + "</div>" +
       '<p class="note">Every backtest runs against real point-in-time S&amp;P 500 ' +
-      "membership — including the companies that were later removed — so the results " +
+      "membership, including the companies that were later removed, so the results " +
       "aren’t flattered by survivorship bias.</p>";
   }
 

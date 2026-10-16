@@ -43,6 +43,17 @@ def _frontend_trade_columns() -> list[str]:
     return re.findall(r'"([^"]+)"', block)
 
 
+def _js_block(marker: str) -> str:
+    """Body of a JS object literal beginning at ``marker`` (through its closing ``};``)."""
+    return APP_JS.split(marker, 1)[1].split("};", 1)[0]
+
+
+def _index_prose() -> str:
+    """index.html with HTML comments stripped, so we test what a visitor reads."""
+    html = (BASE / "index.html").read_text(encoding="utf-8")
+    return re.sub(r"<!--.*?-->", "", html, flags=re.S)
+
+
 class TestStrategyGlossary:
     def test_every_emitted_strategy_has_an_explanation(self):
         if not SIGNALS_JSON.exists():
@@ -55,6 +66,31 @@ class TestStrategyGlossary:
 
     def test_all_oos_states_are_handled(self):
         assert _js_object_keys("var OOS_INFO = {") == {"true", "false", "null"}
+
+    def test_every_strategy_has_an_example(self):
+        block = _js_block("var STRATEGY_INFO = {")
+        keys = _js_object_keys("var STRATEGY_INFO = {")
+        # One plain-English example per strategy, so every glossary card teaches
+        # the rule with a concrete scenario instead of bare jargon.
+        assert block.count("example:") == len(keys)
+        assert block.count("blurb:") == len(keys)
+
+
+class TestPlainEnglishCopy:
+    def test_explanations_avoid_em_dash(self):
+        # An em-dash is the tell that copy was machine-written; keep it out of
+        # the strategy and honesty-badge explanations visitors read.
+        assert "—" not in _js_block("var STRATEGY_INFO = {")
+        assert "—" not in _js_block("var OOS_INFO = {")
+
+    def test_index_prose_avoids_em_dash(self):
+        assert "—" not in _index_prose()
+
+    def test_why_different_leads_with_out_of_sample(self):
+        prose = _index_prose()
+        assert "whether it still works" in prose
+        # The re-tested-on-unseen-data angle comes before the survivorship card.
+        assert prose.index("second opinion") < prose.index("kicked out")
 
 
 class TestTradeColumns:

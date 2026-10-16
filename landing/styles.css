@@ -241,6 +241,7 @@ table.trades td.neg { color: var(--danger); }
 .gloss-head { margin: 18px 0 10px; color: var(--text); }
 .gloss-item h4 { margin: 0 0 4px; font-size: 0.92rem; }
 .gloss-item p { margin: 0; color: var(--muted); font-size: 0.86rem; }
+.gloss-item .gloss-example { margin-top: 6px; color: var(--text); font-size: 0.84rem; font-style: italic; }
 .gloss-item.good h4 { color: var(--accent); }
 .gloss-item.bad h4 { color: var(--warn); }
 .gloss-kind {
