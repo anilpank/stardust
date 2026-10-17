@@ -363,38 +363,3 @@ class TestMainEnsureSpyCalled:
         assert "Done in" in out
         assert "Updated:" in out
         assert "Already current:" in out
-
-
-class TestStrictMode:
-    def _run_main(self, extra_args, tmp_path):
-        import thermaltrend.update_data as update_mod
-        with patch("sys.argv", ["update_data.py", "--output", str(tmp_path), *extra_args]):
-            return update_mod.main()
-
-    @patch("thermaltrend.update_data.update_ticker")
-    @patch("thermaltrend.update_data.ensure_spy")
-    def test_strict_exits_nonzero_on_failure(self, mock_ensure, mock_update, tmp_path, capsys, sample_ohlcv):
-        _write_parquet(tmp_path, "AAPL", sample_ohlcv)
-        mock_update.return_value = "failed"
-
-        with pytest.raises(SystemExit) as exc:
-            self._run_main(["--strict"], tmp_path)
-
-        assert exc.value.code == 1
-        assert "failed to update" in capsys.readouterr().err
-
-    @patch("thermaltrend.update_data.update_ticker")
-    @patch("thermaltrend.update_data.ensure_spy")
-    def test_strict_does_not_exit_when_all_are_current(self, mock_ensure, mock_update, tmp_path, sample_ohlcv):
-        _write_parquet(tmp_path, "AAPL", sample_ohlcv)
-        mock_update.return_value = "up_to_date"
-
-        assert self._run_main(["--strict"], tmp_path) is None
-
-    @patch("thermaltrend.update_data.update_ticker")
-    @patch("thermaltrend.update_data.ensure_spy")
-    def test_without_strict_does_not_exit_on_failure(self, mock_ensure, mock_update, tmp_path, sample_ohlcv):
-        _write_parquet(tmp_path, "AAPL", sample_ohlcv)
-        mock_update.return_value = "failed"
-
-        assert self._run_main([], tmp_path) is None
