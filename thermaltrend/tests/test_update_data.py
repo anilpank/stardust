@@ -373,7 +373,7 @@ class TestStrictMode:
 
     @patch("thermaltrend.update_data.update_ticker")
     @patch("thermaltrend.update_data.ensure_spy")
-    def test_strict_exits_nonzero_on_failure(self, mock_ensure, mock_update, tmp_path, sample_ohlcv):
+    def test_strict_exits_nonzero_on_failure(self, mock_ensure, mock_update, tmp_path, capsys, sample_ohlcv):
         _write_parquet(tmp_path, "AAPL", sample_ohlcv)
         mock_update.return_value = "failed"
 
@@ -381,6 +381,7 @@ class TestStrictMode:
             self._run_main(["--strict"], tmp_path)
 
         assert exc.value.code == 1
+        assert "failed to update" in capsys.readouterr().err
 
     @patch("thermaltrend.update_data.update_ticker")
     @patch("thermaltrend.update_data.ensure_spy")
