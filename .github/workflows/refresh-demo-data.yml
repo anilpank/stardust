@@ -1,0 +1,95 @@
+name: Refresh demo data
+
+on:
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: refresh-demo-data
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pandas numpy pyarrow yfinance flask pytest
+
+      - name: Update price data
+        run: |
+          for attempt in 1 2 3; do
+            if python thermaltrend/update_data.py --strict; then
+              exit 0
+            fi
+            echo "update_data attempt $attempt failed; retrying in 60s"
+            sleep 60
+          done
+          echo "update_data failed after retries" >&2
+          exit 1
+
+      - name: Generate demo signals and trades
+        run: |
+          TICKERS=$(python -c "import json;print(' '.join(json.load(open('landing/demo_signals.json'))['tickers']))")
+          python landing/generate_demo_data.py --workers 4 --tickers $TICKERS
+
+      - name: Validate generated data
+        run: python -m pytest landing/tests/ -q
+
+      - name: Check for meaningful changes
+        id: changed
+        run: |
+          python - <<'PY' >> "$GITHUB_OUTPUT"
+          import json
+          import subprocess
+
+          def strip(raw):
+              data = json.loads(raw)
+              data.pop("generated_at", None)
+              return data
+
+          def committed(path):
+              return subprocess.check_output(["git", "show", f"HEAD:{path}"])
+
+          changed = False
+          for path in ("landing/demo_signals.json", "landing/demo_trades.json"):
+              with open(path, "rb") as handle:
+                  if strip(handle.read()) != strip(committed(path)):
+                      changed = True
+
+          print(f"changed={'true' if changed else 'false'}")
+          PY
+
+      - name: Open pull request
+        if: steps.changed.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          branch="data/refresh-$(date -u +%Y%m%d)"
+          gh pr list --head "$branch" --state open --json number --jq '.[].number' \
+            | xargs -r -n1 gh pr close
+          git push origin --delete "$branch" 2>/dev/null || true
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$branch"
+          git add landing/demo_signals.json landing/demo_trades.json
+          git commit -m "chore: refresh landing demo data ($(date -u +%Y-%m-%d))"
+          git push -u origin "$branch"
+          gh pr create \
+            --base main --head "$branch" \
+            --title "chore: refresh landing demo data ($(date -u +%Y-%m-%d))" \
+            --body "Automated daily refresh: price data updated and demo signals/trades regenerated from the latest close. Merge and redeploy to publish it live."
