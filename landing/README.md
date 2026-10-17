@@ -126,6 +126,23 @@ Then commit `landing/demo_signals.json`, `landing/demo_trades.json` and
 `landing/tickers.json` and redeploy (the Docker image bakes them in — see
 `Dockerfile`).
 
+### Automated daily refresh
+
+`.github/workflows/refresh-demo-data.yml` runs every day at 03:00 UTC (≈10–11pm US
+Eastern, after the close) and on manual **Run workflow**. It refreshes price data
+(`update_data.py --strict`), regenerates the demo JSON for the whole universe,
+runs the `landing/tests/` gate, and opens a `data/refresh-YYYYMMDD` pull request
+with the refreshed `demo_signals.json` / `demo_trades.json` — only when the
+content actually changed (ignoring `generated_at`, so weekends produce no PR),
+and only when every ticker succeeded. Merge the PR and redeploy to publish it.
+
+It commits **only** the JSON, not the ~195 MB of Parquet, to avoid bloating git;
+the committed Parquet stays a periodically-refreshed baseline that each CI run
+tops up from Yahoo. Scheduled workflows are auto-disabled after 60 days without
+repo activity, so keep the repo active. New S&P 500 members remain a manual step
+(`download_data.py` + the membership tables) — the daily job only refreshes prices
+for tickers already present, and it does not rebuild `tickers.json`.
+
 > A ticker missing from `demo_signals.json` (or without price data) is not a dead
 > end: the page shows the "we don't have a cached report" message and still
 > captures the visitor's email, so unknown tickers don't need any configuration.

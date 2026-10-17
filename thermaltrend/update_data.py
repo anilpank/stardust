@@ -9,10 +9,12 @@ Also ensures SPY (S&P 500 ETF) data is always present and up to date.
 Usage:
     python update_data.py                       # Update all tickers
     python update_data.py --tickers AAPL MSFT   # Update specific tickers
+    python update_data.py --strict              # Exit nonzero if any ticker fails
 """
 
 import argparse
 import gc
+import sys
 import time
 from datetime import timedelta
 from pathlib import Path
@@ -137,6 +139,10 @@ def main():
         "--output", default=str(DATA_DIR),
         help="Directory containing Parquet files",
     )
+    parser.add_argument(
+        "--strict", action="store_true",
+        help="Exit nonzero if any ticker fails, so automated runs don't publish stale data",
+    )
     args = parser.parse_args()
 
     data_dir = Path(args.output)
@@ -170,6 +176,10 @@ def main():
 
     progress.close()
     print(format_summary(counts, failed, progress.elapsed))
+
+    if args.strict and failed:
+        print(f"\n!! {len(failed)} ticker(s) failed to update.", file=sys.stderr)
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

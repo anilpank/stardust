@@ -149,6 +149,13 @@ dev) or `ADMIN_PASS_HASH` (scrypt `salt:hash`, production, from
   - The generator checkpoints after every ticker, so an interrupted run leaves a
     partial file; restore with `git checkout -- landing/demo_signals.json` (and
     `landing/demo_trades.json`).
+- **A GitHub Actions job refreshes them daily**
+  (`.github/workflows/refresh-demo-data.yml`): 03:00 UTC (or manual dispatch) →
+  `update_data.py --strict` → full-universe `generate_demo_data.py` →
+  `landing/tests/` gate → opens a `data/refresh-YYYYMMDD` PR only when the content
+  changed (ignoring `generated_at`). It commits the JSON but **not** the Parquet.
+  Scheduled workflows auto-disable after 60 days without repo activity. See
+  `landing/README.md`.
 
 ## Conventions
 
