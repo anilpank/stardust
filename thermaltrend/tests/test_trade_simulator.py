@@ -200,3 +200,58 @@ class TestTradeSimulator:
         ]
         trades = sim.simulate(signals, price_data)
         assert trades[0].strategy_id == "my_strategy"
+
+
+class TestMissingPriceBars:
+    """Bars that exist but carry a missing/zero quote must not crash or trade."""
+
+    def test_get_price_on_date_none_for_nan(self):
+        sim = TradeSimulator()
+        price_data, dates = _simple_up_data(n=5)
+        df = price_data.copy()
+        df.loc[(dates[2], "TEST"), "Open"] = np.nan
+
+        assert sim._get_price_on_date(df, dates[2], "Open") is None
+
+    def test_get_price_on_date_none_for_zero_and_missing(self):
+        sim = TradeSimulator()
+        price_data, dates = _simple_up_data(n=5)
+        df = price_data.copy()
+        df.loc[(dates[2], "TEST"), "Open"] = 0.0
+
+        assert sim._get_price_on_date(df, dates[2], "Open") is None
+        assert sim._get_price_on_date(df, pd.Timestamp("2026-01-03"), "Open") is None
+
+    def test_nan_next_open_is_not_traded(self):
+        sim = TradeSimulator(stop_atr_multiple=0.0)
+        price_data, dates = _simple_up_data(n=10)
+        df = price_data.copy()
+        df.loc[(dates[3], "TEST"), "Open"] = np.nan
+
+        signals = [_make_signal("TEST", dates[2], SignalDirection.BUY)]
+        trades = sim.simulate(signals, df)
+
+        assert trades == []
+
+    def test_nan_last_close_drops_position_without_crashing(self):
+        sim = TradeSimulator(stop_atr_multiple=0.0)
+        price_data, dates = _simple_up_data(n=10)
+        df = price_data.copy()
+        df.loc[(dates[-1], "TEST"), "Close"] = np.nan
+
+        signals = [_make_signal("TEST", dates[5], SignalDirection.BUY)]
+        trades = sim.simulate(signals, df)
+
+        assert trades == []
+
+    def test_nan_last_close_on_sell_at_end_does_not_crash(self):
+        sim = TradeSimulator(stop_atr_multiple=0.0)
+        price_data, dates = _simple_up_data(n=10)
+        df = price_data.copy()
+        df.loc[(dates[-1], "TEST"), "Close"] = np.nan
+
+        signals = [_make_signal("TEST", dates[5], SignalDirection.BUY),
+                   _make_signal("TEST", dates[-1], SignalDirection.SELL)]
+        trades = sim.simulate(signals, df)
+
+        assert trades == []

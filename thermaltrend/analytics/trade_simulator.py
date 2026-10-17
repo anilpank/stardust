@@ -158,10 +158,22 @@ class TradeSimulator:
     def _get_price_on_date(
         self, ticker_data: pd.DataFrame, date: pd.Timestamp, field: str = "Open"
     ) -> float | None:
-        """Get a price field on a specific date."""
-        if date in ticker_data.index:
-            return float(ticker_data.loc[date, field])
-        return None
+        """Get a usable price on a specific date, or None.
+
+        A bar that exists but carries a missing/zero/non-finite quote (common in
+        removed/delisted names, where only Volume is present) is treated as no
+        price at all, so callers fall back instead of dividing by ``NaN``.
+        """
+        if date not in ticker_data.index:
+            return None
+        value = ticker_data.loc[date, field]
+        if isinstance(value, pd.Series):
+            value = value.iloc[0]
+        try:
+            price = float(value)
+        except (TypeError, ValueError):
+            return None
+        return price if np.isfinite(price) and price > 0 else None
 
     def _simulate_ticker(
         self,
@@ -230,6 +242,8 @@ class TradeSimulator:
                     exit_price = self._get_price_on_date(
                         ticker_data, exit_date, "Close"
                     )
+                    if exit_price is None:
+                        break
                     trade = self._close_trade(
                         open_position, exit_date, exit_price, "data_end"
                     )
@@ -318,8 +332,11 @@ class TradeSimulator:
         if bars_before.empty:
             return None
 
-        last_date = bars_before.index[-1]
-        last_close = float(bars_before.loc[last_date, "Close"])
+        closes = bars_before["Close"].dropna()
+        if closes.empty:
+            return None
+        last_date = closes.index[-1]
+        last_close = float(closes.iloc[-1])
         gap_days = (removal - last_date).days
         if gap_days > self.max_delisting_gap_days:
             return (
