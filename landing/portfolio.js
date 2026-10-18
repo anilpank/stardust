@@ -333,9 +333,14 @@
       return;
     }
     var run = payload.runs[state.runIdx];
-    $("#run-meta").textContent =
-      run.strategy + " · " + run.tickers.join(" ") + " · " +
-      (run.equity.dates[0] || "") + " → " + (run.equity.dates[run.equity.dates.length - 1] || "");
+    var meta = [];
+    if (run.strategy) meta.push(run.strategy);
+    if (run.tickers && run.tickers.length) meta.push(run.tickers.join(" "));
+    meta.push(
+      (run.equity.dates[0] || "") + " → " +
+      (run.equity.dates[run.equity.dates.length - 1] || "")
+    );
+    $("#run-meta").textContent = meta.join(" · ");
     renderKpis(run);
     renderEquityChart(run);
     renderExposureChart(run);

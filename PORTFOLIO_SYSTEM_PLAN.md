@@ -89,6 +89,32 @@ backtested against it before freezing.
    invariants (cash ≥ 0, cash ≥ principal target, exposure ≤ band, integer
    shares), CLI smoke tests.
 
+#### Control experiment — where the return comes from (measured 1994-2026)
+
+`portfolio_backtest.py --no-satellite` (and `core_enabled=False` for the
+complement) splits the system so the satellite lane and the core sleeve can be
+measured on one shared window (rf = 4%, matching the metric):
+
+| Run | CAGR | vol | Sharpe | maxDD | worst 12M | avg exp | breaker |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Full — MA crossover | 4.9% | 6.5% | 0.15 | −12.4% | −8.1% | 34% | 35% |
+| Full — Donchian | 5.4% | 5.9% | 0.25 | −9.2% | −6.8% | 32% | 26% |
+| Control — core only | 3.6% | 5.3% | −0.06 | −11.4% | −6.5% | 31% | 26% |
+| Control — satellite only | 1.8% | 4.0% | −0.52 | −8.6% | −6.4% | 7% | 42% |
+| SPY buy & hold | 10.8% | 18.5% | 0.37 | −55.2% | — | — | — |
+
+Read: the core SPY-timing sleeve is the base engine; satellite selection adds
+~+1.3–1.8pp of CAGR on top (but on hindsight-chosen tickers) and cannot stand
+alone. All variants are drawdown-reduction vehicles, not return maximisers.
+
+**Known gap that biases this table against the system:** the principal/idle
+cash sleeve earns **0%** in the backtest, while the metric judges it against a
+4% risk-free rate. Crediting the T-bill sleeve (as the design specifies) lifts
+the Sharpe of every variant to ~+0.45–0.50 — above SPY's 0.37 — and raises
+CAGR by ~2.5–3pp. A `cash_yield` config knob is the next engine fix; until it
+lands, treat the raw-vs-SPY comparison as incomplete.
+
+
 ### Phase B — Shadow-run loop: journal + snapshot + admin console
 
 6. **Journal tables** in landing SQLite (`journal_fills`, `journal_decisions`,
