@@ -1,6 +1,7 @@
 # Portfolio System Plan — personal $10–20K trading system
 
-**Status:** Active — building (Phase A).
+**Status:** Active — Phase A engine ✅, backtest console ✅, control experiment ✅;
+**next: `cash_yield` engine fix, then Phase A tuning gate.**
 **Date:** October 2026
 **Owner:** Anil
 **Scope:** A personal, admin-gated trading system for a $10K–$20K account: good
@@ -8,6 +9,43 @@ returns with the safety of principal made as structural as markets allow. The
 paid-product/subscription angle is deliberately **out of scope** here — this plan
 serves the operator only. (Related but separate: `PAID_PRODUCT_PLAN.md`,
 `thermaltrend/ROADMAP.md` Phase 4.)
+
+---
+
+## Resume here (next session)
+
+Branch **`feat/spy-only-control`** holds the control experiment (pushed, awaiting
+merge to `main`). Everything green: 916 fast + landing tests pass. Pick up with
+**step 1 below**, in order:
+
+1. **Add `cash_yield` to the engine** (the one change that un-biases every
+   number — see "Known gap" under Phase A). Design:
+   - `PortfolioConfig.cash_yield: float = 0.0` (annual; off by default so today's
+     numbers stay reproducible), validated `>= 0`; the live config sets it to
+     `0.04` to match `RISK_FREE_RATE`.
+   - In `manager.py`, accrue daily interest on the **idle cash** balance
+     (`cash - invested_notional`, i.e. everything not in a position — which
+     includes the principal sleeve) at `cash_yield / 252`, credited to cash each
+     step *before* fills. The committed payload should carry both a yield-off
+     and a yield-on run so the effect is visible side by side.
+   - Tests: interest accrues on idle cash only; zero exposure compounds exactly
+     at `cash_yield`; breaker/ratchet still behave; `cash_yield=0` reproduces
+     today's numbers byte-for-byte.
+   - Re-run the decomposition (`portfolio_backtest.py --no-satellite` vs full vs
+     `core_enabled=False`) and confirm the counterfactual: Sharpes climb to
+     ~+0.45–0.50, CAGR +2.5–3pp.
+2. **Re-generate the console payload** (`landing/generate_portfolio_data.py`)
+   and re-state the verdict in the control-experiment table + README note.
+3. **Decide the satellite lane:** it adds ~+1.3–1.8pp but only on
+   hindsight-picked tickers and cannot stand alone. Either validate it on the
+   point-in-time universe (`--universe point_in_time`) or plan to drop it and
+   keep core-only until it proves an edge.
+4. **Only then** run the Phase A tuning gate (item 3): tune risk knobs on train
+   windows, sanity-check walk-forward, freeze `live_config`.
+
+Open questions to settle along the way: whether banked principal should earn a
+*historical* T-bill rate (era-accurate) rather than a flat 4%; and whether the
+breaker's 26–35% trip rate is still too twitchy once cash yield is in.
 
 ---
 
@@ -64,7 +102,7 @@ backtested against it before freezing.
 
 ## 2. Phases
 
-### Phase A — Portfolio engine + measured safety envelope *(current)*
+### Phase A — Portfolio engine + measured safety envelope *(engine ✅ · tuning gate pending)*
 
 1. **`thermaltrend/portfolio/`** (implements ROADMAP Phase 4):
    - `sizing.py` — fixed-fractional risk sizing, notional caps, whole shares,
@@ -81,19 +119,20 @@ backtested against it before freezing.
    runs the whole system over history for $10K and $20K → per-year returns,
    worst 12 months, maxDD, exposure, vs SPY — across regimes (2020, 2022; 2008
    with the point-in-time universe where data allows).
-3. **Validation gate:** tune only risk knobs on train windows, sanity-check
-   walk-forward, **freeze** `live_config`. Proceed to Phase B only if the
-   measured worst-year envelope is within ~−5% of total capital under realistic
-   slippage; otherwise tighten band/breaker and re-run.
+3. **Validation gate (next after `cash_yield`):** tune only risk knobs on train
+   windows, sanity-check walk-forward, **freeze** `live_config`. Proceed to Phase
+   B only if the measured worst-year envelope is within ~−5% of total capital
+   under realistic slippage; otherwise tighten band/breaker and re-run.
 4. **Tests:** sizing math, breaker/ratchet transitions, cash/exposure
    invariants (cash ≥ 0, cash ≥ principal target, exposure ≤ band, integer
    shares), CLI smoke tests.
 
-#### Control experiment — where the return comes from (measured 1994-2026)
+#### Control experiment — where the return comes from (measured 1994-2026) ✅
 
 `portfolio_backtest.py --no-satellite` (and `core_enabled=False` for the
 complement) splits the system so the satellite lane and the core sleeve can be
-measured on one shared window (rf = 4%, matching the metric):
+measured on one shared window (rf = 4%, matching the metric). Runs shipped on
+branch `feat/spy-only-control` and in the console (5 runs total).
 
 | Run | CAGR | vol | Sharpe | maxDD | worst 12M | avg exp | breaker |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -111,8 +150,8 @@ alone. All variants are drawdown-reduction vehicles, not return maximisers.
 cash sleeve earns **0%** in the backtest, while the metric judges it against a
 4% risk-free rate. Crediting the T-bill sleeve (as the design specifies) lifts
 the Sharpe of every variant to ~+0.45–0.50 — above SPY's 0.37 — and raises
-CAGR by ~2.5–3pp. A `cash_yield` config knob is the next engine fix; until it
-lands, treat the raw-vs-SPY comparison as incomplete.
+CAGR by ~2.5–3pp. The `cash_yield` knob is the next engine fix (see *Resume
+here* step 1); until it lands, treat the raw-vs-SPY comparison as incomplete.
 
 
 ### Phase B — Shadow-run loop: journal + snapshot + admin console
