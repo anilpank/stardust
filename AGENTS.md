@@ -113,7 +113,7 @@ dev) or `ADMIN_PASS_HASH` (scrypt `salt:hash`, production, from
 | `thermaltrend/dashboard.py`, `charts.py` | Streamlit dashboard and its Plotly charts |
 | `thermaltrend/tests/` | Unit + integration tests (integration marked `slow`) |
 | `landing/` | Static sales page + Flask experiment server (see `landing/README.md`) |
-| `landing/server.py` | Flask app: page + `/api/signup`, `/api/track`, `/api/demo`, `/api/trades`, `/admin` |
+| `landing/server.py` | Flask app: page + `/api/signup`, `/api/track`, `/api/demo`, `/api/trades`, `/admin`, `/admin/portfolio` |
 | `landing/gen_admin_password.py` | Generates an `ADMIN_PASS_HASH` for admin Basic auth |
 | `landing/tests/` | Landing unit + Flask test-client integration tests |
 | `README.md`, `USER_GUIDE.md` | Project docs and dashboard walkthrough |
@@ -149,6 +149,12 @@ dev) or `ADMIN_PASS_HASH` (scrypt `salt:hash`, production, from
   - The generator checkpoints after every ticker, so an interrupted run leaves a
     partial file; restore with `git checkout -- landing/demo_signals.json` (and
     `landing/demo_trades.json`).
+- `landing/private/portfolio_data.json` is **committed** and produced offline by
+  `landing/generate_portfolio_data.py` (runs the portfolio engine over
+  `DEFAULT_RUNS`; ~4 s for the default three runs). It feeds the admin-gated
+  portfolio console at `/admin/portfolio`. Same staleness rule as the demo
+  files. `landing/private/` is committed but never served as static content —
+  the catch-all route blocks the `private/` and `data/` prefixes.
 
 ## Conventions
 

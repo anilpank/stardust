@@ -725,3 +725,55 @@ class TestLegacyMigration:
         server._initialized.clear()     # force a second migration pass
         server._open().close()          # must skip: the table already has rows
         assert len(_db_rows("signups", server.SIGNUP_FIELDS)) == 1
+
+
+class TestPortfolioRoutes:
+    def test_portfolio_page_requires_auth(self, client):
+        resp = client.get("/admin/portfolio")
+        assert resp.status_code == 401
+        assert "Basic" in resp.headers["WWW-Authenticate"]
+
+    def test_portfolio_page_served_with_auth(self, client):
+        resp = client.get("/admin/portfolio", headers=_auth())
+        assert resp.status_code == 200
+        assert b"portfolio console" in resp.data
+
+    def test_portfolio_data_requires_auth(self, client):
+        resp = client.get("/api/admin/portfolio")
+        assert resp.status_code == 401
+
+    def test_portfolio_data_missing_file(self, client, tmp_path, monkeypatch):
+        monkeypatch.setattr(server, "PORTFOLIO_JSON", tmp_path / "absent.json")
+        resp = client.get("/api/admin/portfolio", headers=_auth())
+        assert resp.status_code == 404
+        assert resp.get_json()["available"] is False
+
+    def test_portfolio_data_served_with_auth(self, client, tmp_path, monkeypatch):
+        payload = {
+            "generated_at": "2026-10-18T00:00:00+00:00",
+            "runs": [{"id": "r1", "label": "Run 1", "trades": []}],
+        }
+        path = tmp_path / "portfolio_data.json"
+        path.write_text(json.dumps(payload), encoding="utf-8")
+        monkeypatch.setattr(server, "PORTFOLIO_JSON", path)
+        resp = client.get("/api/admin/portfolio", headers=_auth())
+        assert resp.status_code == 200
+        assert resp.headers["Cache-Control"] == "no-store"
+        assert resp.get_json()["runs"][0]["id"] == "r1"
+
+    def test_portfolio_data_not_in_public_static(self, client):
+        assert client.get("/private/portfolio_data.json").status_code == 404
+
+    def test_runtime_data_dir_not_served(self, client):
+        assert client.get("/data/landing.db").status_code == 404
+
+    def test_committed_payload_is_valid_if_present(self, client):
+        if not server.PORTFOLIO_JSON.exists():
+            pytest.skip("portfolio_data.json not generated")
+        resp = client.get("/api/admin/portfolio", headers=_auth())
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["runs"]
+        run = data["runs"][0]
+        for key in ("id", "label", "config", "metrics", "equity", "daily", "trades"):
+            assert key in run

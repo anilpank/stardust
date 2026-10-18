@@ -42,13 +42,16 @@ That's it — the first pulls the latest code, the second updates the app, resta
 | `styles.css` | Styling (dark fintech theme, responsive). |
 | `app.js` | Ticker lookup, matrix rendering, funnel tracking, signup. |
 | `admin.html` / `admin.js` / `admin.css` | Read-only console: KPIs, funnel, leads, events. |
-| `server.py` | Flask app: serves the page + `/api/signup`, `/api/track`, `/api/demo`, `/api/trades`, `/api/quote`, `/admin`. |
+| `admin_portfolio.html` / `portfolio.js` / `portfolio.css` | Portfolio console (`/admin/portfolio`): backtest KPIs, SVG charts, trades. |
+| `server.py` | Flask app: serves the page + `/api/signup`, `/api/track`, `/api/demo`, `/api/trades`, `/api/quote`, `/admin`, `/admin/portfolio`. |
 | `gen_admin_password.py` | Generates an `ADMIN_PASS_HASH` (`salt:hash`) for admin Basic auth. |
 | `generate_demo_data.py` | Runs the real engine → writes `demo_signals.json` + `demo_trades.json`. |
+| `generate_portfolio_data.py` | Runs the portfolio engine → writes `private/portfolio_data.json`. |
 | `demo_signals.json` | Pre-computed winning strategy per ticker × timeframe + OOS badge, latest close, and each call's signal date/price/return-since. |
 | `demo_trades.json` | Pre-computed actual trades per ticker × timeframe (powers the drill-down). |
 | `generate_ticker_index.py` | Builds `tickers.json` (ticker → company name) from the membership table. |
 | `tickers.json` | Offline name index so visitors can search by company name. |
+| `private/` | Committed admin-only payloads (`portfolio_data.json`); never served statically. |
 | `requirements.txt`, `Dockerfile` | Deployment. |
 | `deploy/provision.sh` | Idempotent Amazon Linux 2023 provisioner (systemd + nginx + certbot + backups). |
 | `deploy/backup_db.py` | Daily `VACUUM INTO` DB snapshot + pruning (systemd timer). |
@@ -329,6 +332,38 @@ ADMIN_PASS_HASH='<salt>:<hash>' ADMIN_USER=admin \
 `deploy/gen-admin-password.js` output works too. After **6 failed attempts** from
 one IP, further logins are locked out for 5 minutes. Basic auth covers
 `/api/admin/data`, the CSV exports, and the DB snapshot — not just the HTML page.
+
+---
+
+## Portfolio console — backtests behind the same admin auth
+
+**http://127.0.0.1:8000/admin/portfolio** renders the personal portfolio
+system's backtests (see `PORTFOLIO_SYSTEM_PLAN.md` and `thermaltrend/portfolio/`).
+Same Basic-auth guard as `/admin`; nothing about it is public.
+
+- **Run selector** — switches between the configured backtest runs.
+- **KPI cards** — equity path, CAGR, Sharpe, maxDD, **worst 12 months** (the
+  safety envelope), win rate, exposure/breaker stats, money banked into the
+  principal sleeve, excess vs SPY.
+- **Equity vs SPY chart** (hand-rolled SVG, no JS dependencies) with SPY
+  rebased to the same capital.
+- **Exposure / breaker / regime strip** — daily exposure against the band
+  max, breaker-tripped days shaded red, core-SPY-on band, bear-regime band.
+- **Per-year returns, config & gate panel, trades table** (filter by lane /
+  ticker / exit reason), **monthly ratchet** and **breaker event** logs.
+
+Like the demo data, the page serves a **committed JSON file** — the server
+never runs the engine. Regenerate after refreshing price data:
+
+```bash
+# from the repo root
+python landing/generate_portfolio_data.py   # writes landing/private/portfolio_data.json (~2 MB)
+```
+
+The payload lives in `landing/private/`, which is committed but **never served
+as a static file** (the catch-all route blocks `private/` and `data/` — the
+latter also protects `landing.db`). To change which runs appear, edit
+`DEFAULT_RUNS` in `landing/generate_portfolio_data.py`.
 
 ---
 
