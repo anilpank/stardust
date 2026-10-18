@@ -50,7 +50,7 @@ import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
-from flask import Flask, Response, jsonify, request, send_from_directory
+from flask import Flask, Response, jsonify, request, send_file, send_from_directory
 
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = Path(os.environ.get("LANDING_DATA_DIR", BASE_DIR / "data"))
@@ -60,6 +60,7 @@ SIGNUPS_CSV = DATA_DIR / "signups.csv"
 EVENTS_CSV = DATA_DIR / "events.csv"
 DEMO_JSON = BASE_DIR / "demo_signals.json"
 TRADES_JSON = BASE_DIR / "demo_trades.json"
+PORTFOLIO_JSON = BASE_DIR / "private" / "portfolio_data.json"
 
 # Delayed quotes for the prototype, proxied from Yahoo Finance. Results are
 # cached so a burst of lookups on the same ticker hits Yahoo once; failures are
@@ -555,6 +556,27 @@ def admin_page():
     return send_from_directory(BASE_DIR, "admin.html")
 
 
+@app.get("/admin/portfolio")
+def admin_portfolio_page():
+    guard = _admin_guard()
+    if guard:
+        return guard
+    return send_from_directory(BASE_DIR, "admin_portfolio.html")
+
+
+@app.get("/api/admin/portfolio")
+def admin_portfolio_data():
+    """Serve the pre-generated portfolio-backtest payload (never runs the engine)."""
+    guard = _admin_guard()
+    if guard:
+        return guard
+    if not PORTFOLIO_JSON.exists():
+        return jsonify({"ok": False, "available": False}), 404
+    resp = send_file(PORTFOLIO_JSON, mimetype="application/json")
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
+
+
 @app.get("/api/admin/data")
 def admin_data():
     guard = _admin_guard()
@@ -627,7 +649,12 @@ def index():
 
 @app.get("/<path:filename>")
 def static_files(filename: str):
-    if filename.startswith("api/") or filename == "admin":
+    if (
+        filename.startswith("api/")
+        or filename.startswith("data/")
+        or filename.startswith("private/")
+        or filename == "admin"
+    ):
         return jsonify({"ok": False, "error": "not found"}), 404
     return send_from_directory(BASE_DIR, filename)
 

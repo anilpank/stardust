@@ -208,3 +208,56 @@ class TestPriceContextPresentation:
         for selector in (".signal-context", ".win-call-ctx", ".quote"):
             assert selector in css
 
+
+
+class TestPortfolioConsoleAssets:
+    """Guard the portfolio console's static couplings."""
+
+    BASE = Path(__file__).resolve().parent.parent
+    PAGE = BASE / "admin_portfolio.html"
+    JS = BASE / "portfolio.js"
+
+    def test_page_and_script_exist(self):
+        assert self.PAGE.exists()
+        assert self.JS.exists()
+
+    def test_js_fetches_the_guarded_endpoint(self):
+        js = self.JS.read_text(encoding="utf-8")
+        assert 'fetch("/api/admin/portfolio"' in js
+
+    def test_page_wiring_ids_exist_in_js(self):
+        page = self.PAGE.read_text(encoding="utf-8")
+        js = self.JS.read_text(encoding="utf-8")
+        for element_id in ("run-select", "kpis", "equity-chart", "exposure-chart",
+                           "per-year", "config-table", "trades", "ratchet", "breakers"):
+            assert f'id="{element_id}"' in page, element_id
+            assert f'#{element_id}' in js, element_id
+
+    def test_page_is_noindex(self):
+        assert "noindex" in self.PAGE.read_text(encoding="utf-8")
+
+
+class TestAdminSubpathAssets:
+    """Admin pages served at a sub-path must load assets from the site root.
+
+    ``href="styles.css"`` resolves to ``/admin/styles.css`` on those pages
+    (404 → unstyled page). Every ``src``/``href`` in an HTML file must be
+    root-absolute or external.
+    """
+
+    BASE = Path(__file__).resolve().parent.parent
+    PAGES = ("index.html", "admin.html", "admin_portfolio.html")
+    ROOT = re.compile(r"^/")
+
+    @pytest.mark.parametrize("page", PAGES)
+    def test_asset_urls_are_root_absolute(self, page):
+        html = (self.BASE / page).read_text(encoding="utf-8")
+        urls = re.findall(r'(?:src|href)="([^"]+)"', html)
+        assert urls, f"{page}: expected at least one src/href"
+        for url in urls:
+            assert (
+                self.ROOT.match(url) or url.startswith(("http", "data:", "#", "mailto:"))
+            ), (
+                f'{page}: "{url}" is document-relative; use "/{url}" so it '
+                "resolves from the site root"
+            )

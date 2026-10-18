@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="robots" content="noindex, nofollow" />
+  <title>stardust · portfolio console</title>
+  <link rel="stylesheet" href="/styles.css" />
+  <link rel="stylesheet" href="/admin.css" />
+  <link rel="stylesheet" href="/portfolio.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="wrap wide">
+      <span class="brand">✦ stardust <span class="muted">· portfolio console</span></span>
+      <span class="topbar-actions">
+        <select id="run-select" title="Backtest run"></select>
+        <span id="updated" class="muted small">—</span>
+        <button type="button" id="refresh" class="chip">Refresh</button>
+        <a class="chip" href="/admin">Experiment console</a>
+      </span>
+    </div>
+  </header>
+
+  <main class="wrap wide">
+    <p id="run-meta" class="muted small"></p>
+
+    <section class="kpis" id="kpis"></section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Equity vs SPY <span class="muted small">(SPY rebased to same capital)</span></h2>
+        <span class="legend small">
+          <span class="swatch portfolio"></span> portfolio
+          <span class="swatch spy"></span> SPY
+        </span>
+      </div>
+      <div id="equity-chart" class="chart"></div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Exposure, breaker &amp; regime</h2>
+        <span class="legend small">
+          <span class="swatch exposure"></span> exposure
+          <span class="swatch breaker"></span> breaker tripped
+          <span class="swatch core"></span> core SPY on
+          <span class="swatch bear"></span> bear regime
+        </span>
+      </div>
+      <div id="exposure-chart" class="chart short"></div>
+    </section>
+
+    <div class="two-col">
+      <section class="panel">
+        <div class="panel-head"><h2>Per-year returns</h2></div>
+        <div class="table-scroll tall">
+          <table class="data">
+            <thead><tr><th>Year</th><th class="num">Return</th></tr></thead>
+            <tbody id="per-year"></tbody>
+          </table>
+        </div>
+      </section>
+      <section class="panel">
+        <div class="panel-head"><h2>Risk, config &amp; gates</h2></div>
+        <table class="data">
+          <tbody id="config-table"></tbody>
+        </table>
+        <div id="benchmark" class="bench"></div>
+        <div id="rejected" class="pills"></div>
+      </section>
+    </div>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Trades <span id="trade-count" class="muted"></span></h2>
+        <div class="filters">
+          <select id="trade-lane">
+            <option value="">All lanes</option>
+            <option value="satellite">Satellite</option>
+            <option value="core">Core</option>
+          </select>
+          <input id="trade-search" type="text" placeholder="Filter ticker / exit reason…" />
+        </div>
+      </div>
+      <div class="table-scroll tall">
+        <table class="data">
+          <thead>
+            <tr>
+              <th>Entry</th><th>Ticker</th><th>Lane</th><th class="num">Shares</th>
+              <th class="num">Entry $</th><th>Stop $</th><th>Exit</th>
+              <th class="num">Exit $</th><th class="num">P&amp;L</th>
+              <th class="num">P&amp;L %</th><th>Exit reason</th><th>Strategy</th>
+            </tr>
+          </thead>
+          <tbody id="trades"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <div class="two-col">
+      <section class="panel">
+        <div class="panel-head"><h2>Monthly ratchet</h2></div>
+        <div class="table-scroll tall">
+          <table class="data">
+            <thead>
+              <tr><th>Date</th><th class="num">Banked</th><th class="num">Equity</th><th class="num">Principal target</th></tr>
+            </thead>
+            <tbody id="ratchet"></tbody>
+          </table>
+        </div>
+      </section>
+      <section class="panel">
+        <div class="panel-head"><h2>Breaker events</h2></div>
+        <div class="table-scroll tall">
+          <table class="data">
+            <thead>
+              <tr><th>Date</th><th>State</th><th class="num">Equity</th><th class="num">HWM</th></tr>
+            </thead>
+            <tbody id="breakers"></tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <script src="/portfolio.js"></script>
+</body>
+</html>
