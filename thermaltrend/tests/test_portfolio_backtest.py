@@ -103,6 +103,40 @@ class TestRunPortfolioBacktest:
         assert isinstance(result.trades, list)
 
 
+class TestSatelliteControl:
+    def test_no_satellite_skips_stock_signals(self, data_dir):
+        result = run_portfolio_backtest(
+            satellite=False, start_date="2025-01-02", data_dir=str(data_dir)
+        )
+        assert result.metrics["equity_start"] == 10_000.0
+        assert result.metrics["satellite_trades"] == 0
+        assert all(t.strategy_id == "core" for t in result.trades)
+        assert result.metrics["core_trades"] == result.metrics["trades_total"]
+
+    def test_no_satellite_needs_no_strategy_or_tickers(self, data_dir):
+        result = run_portfolio_backtest(
+            strategy_name=None, tickers=None, satellite=False,
+            start_date="2025-01-02", data_dir=str(data_dir),
+        )
+        assert result.metrics["equity_start"] == 10_000.0
+
+    def test_no_satellite_ignores_unknown_strategy(self, data_dir):
+        result = run_portfolio_backtest(
+            strategy_name="nonexistent", satellite=False,
+            start_date="2025-01-02", data_dir=str(data_dir),
+        )
+        assert result.metrics["trades_total"] >= 0
+
+    def test_satellite_only_control(self, data_dir):
+        cfg = PortfolioConfig(core_enabled=False)
+        result = run_portfolio_backtest(
+            "ma_crossover", ["TEST"], start_date="2025-01-02",
+            data_dir=str(data_dir), config=cfg,
+        )
+        assert result.core_history == []
+        assert result.metrics["core_trades"] == 0
+
+
 class TestPrintSummary:
     def test_prints_summary(self, data_dir, capsys):
         result = run_portfolio_backtest(
@@ -114,3 +148,11 @@ class TestPrintSummary:
         assert "ma_crossover" in captured.out
         assert "Equity:" in captured.out
         assert "vs SPY" in captured.out
+
+    def test_prints_control_label(self, data_dir, capsys):
+        result = run_portfolio_backtest(
+            satellite=False, start_date="2025-01-02", data_dir=str(data_dir)
+        )
+        _print_summary(result, None)
+        captured = capsys.readouterr()
+        assert "SPY-only control" in captured.out

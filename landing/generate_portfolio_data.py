@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import argparse
 import json
-from dataclasses import asdict, is_dataclass
+from dataclasses import asdict, is_dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -51,6 +51,26 @@ DEFAULT_RUNS = [
         "strategy": "ma_crossover",
         "tickers": ["AAPL", "MSFT"],
         "capital": 20_000.0,
+    },
+    # Controls that decompose where the return comes from: the same $10K and
+    # the same risk overlay, once with the satellite lane switched off and once
+    # with the core sleeve switched off. Pinned to a shared start (SPY history
+    # plus regime/momentum warm-up) so the two controls are comparable.
+    {
+        "id": "core-only-spy-10k",
+        "label": "Control: SPY core only · no satellite · $10K",
+        "satellite": False,
+        "capital": 10_000.0,
+        "start": "1994-01-03",
+    },
+    {
+        "id": "satellite-only-aapl-msft-10k",
+        "label": "Control: satellite only · no core · $10K",
+        "strategy": "ma_crossover",
+        "tickers": ["AAPL", "MSFT"],
+        "capital": 10_000.0,
+        "start": "1994-01-03",
+        "config": replace(PortfolioConfig(), core_enabled=False),
     },
 ]
 
@@ -97,8 +117,8 @@ def _serialize_run(spec: dict, result, core_closes: pd.Series | None) -> dict:
     payload = {
         "id": spec["id"],
         "label": spec["label"],
-        "strategy": spec["strategy"],
-        "tickers": list(spec["tickers"]),
+        "strategy": spec.get("strategy"),
+        "tickers": list(spec.get("tickers") or []),
         "capital": cfg.capital,
         "config": _jsonable(cfg.to_dict()),
         "metrics": _jsonable(result.metrics),
@@ -160,14 +180,15 @@ def build_payload(
         if core_ticker not in core_cache:
             core_cache[core_ticker] = _load_core_closes(data_dir, core_ticker)
         result = run_portfolio_backtest(
-            strategy_name=spec["strategy"],
-            tickers=list(spec["tickers"]),
+            strategy_name=spec.get("strategy"),
+            tickers=list(spec.get("tickers") or []),
             start_date=spec.get("start"),
             end_date=spec.get("end"),
             params=spec.get("params"),
             data_dir=str(data_dir),
             config=run_config,
             capital=spec.get("capital"),
+            satellite=spec.get("satellite", True),
         )
         payload_runs.append(_serialize_run(spec, result, core_cache[core_ticker]))
     return {

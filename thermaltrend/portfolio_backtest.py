@@ -9,6 +9,7 @@ Usage:
     python thermaltrend/portfolio_backtest.py --strategy ma_crossover --tickers AAPL MSFT --capital 10000
     python thermaltrend/portfolio_backtest.py --strategy donchian --tickers AAPL MSFT --start 2018-01-01 --config live_config.json
     python thermaltrend/portfolio_backtest.py --strategy factor_scoring --universe point_in_time --start 2007-01-01
+    python thermaltrend/portfolio_backtest.py --no-satellite --capital 10000   # SPY-only control
 """
 
 import json
@@ -30,8 +31,8 @@ from thermaltrend.portfolio.manager import PortfolioManager, PortfolioResult
 
 
 def run_portfolio_backtest(
-    strategy_name: str,
-    tickers: list[str],
+    strategy_name: str | None = None,
+    tickers: list[str] | None = None,
     start_date: str | None = None,
     end_date: str | None = None,
     params: dict | None = None,
@@ -39,9 +40,17 @@ def run_portfolio_backtest(
     universe: str = "current",
     config: PortfolioConfig | None = None,
     capital: float | None = None,
+    satellite: bool = True,
 ) -> PortfolioResult:
-    """Run the portfolio system over history. Library-friendly."""
-    if strategy_name not in STRATEGIES:
+    """Run the portfolio system over history. Library-friendly.
+
+    ``satellite=False`` is the SPY-only control: the satellite stock-signal
+    lane is skipped entirely (no strategy runs, no tickers needed) and the
+    account is driven solely by the core index-timing sleeve and the shared
+    risk overlay. Pass ``config`` with ``core_enabled=False`` for the
+    complementary satellite-only control.
+    """
+    if satellite and strategy_name not in STRATEGIES:
         raise ValueError(
             f"Unknown strategy '{strategy_name}'. "
             f"Available: {', '.join(STRATEGIES.keys())}"
@@ -50,7 +59,7 @@ def run_portfolio_backtest(
     if capital is not None:
         cfg = replace(cfg, capital=capital)
 
-    feed_tickers = list(dict.fromkeys([*tickers, cfg.core_ticker]))
+    feed_tickers = list(dict.fromkeys([*(tickers or []), cfg.core_ticker]))
     feed_kwargs = dict(
         data_dir=data_dir,
         tickers=feed_tickers,
@@ -66,18 +75,21 @@ def run_portfolio_backtest(
     if len(feed) == 0:
         raise ValueError("No data found. Check your --tickers and date range.")
 
-    engine = DataEngine(feed, STRATEGIES[strategy_name](params))
-    signals = engine.run()
+    signals = []
+    if satellite:
+        engine = DataEngine(feed, STRATEGIES[strategy_name](params))
+        signals = engine.run()
     return PortfolioManager(cfg).run(signals, feed._data)
 
 
-def _print_summary(result: PortfolioResult, strategy_name: str) -> None:
+def _print_summary(result: PortfolioResult, strategy_name: str | None) -> None:
     cfg = result.config
     m = result.metrics
     bench = m.get("benchmark") or {}
 
+    label = strategy_name if strategy_name else "SPY-only control (no satellite)"
     print()
-    print(f"Portfolio system — strategy: {strategy_name}")
+    print(f"Portfolio system — strategy: {label}")
     print(
         f"Capital: ${cfg.capital:,.0f}  "
         f"(band {cfg.band_min:.0%}–{cfg.band_max:.0%}, "
@@ -133,12 +145,17 @@ def main():
     )
     parser.add_argument(
         "--strategy",
-        required=True,
         choices=list(STRATEGIES.keys()),
-        help="Satellite strategy",
+        help="Satellite strategy (required unless --no-satellite)",
     )
     parser.add_argument("--ticker", default=None, help="Single ticker (shorthand)")
     parser.add_argument("--tickers", nargs="+", default=None, help="Multiple tickers")
+    parser.add_argument(
+        "--no-satellite",
+        action="store_true",
+        help="SPY-only control: run only the core index-timing sleeve "
+             "(no satellite stock signals; --strategy/--tickers not needed)",
+    )
     parser.add_argument("--start", default=None, help="Start date (YYYY-MM-DD)")
     parser.add_argument("--end", default=None, help="End date (YYYY-MM-DD)")
     parser.add_argument(
@@ -159,8 +176,12 @@ def main():
     )
     args = parser.parse_args()
 
+    satellite = not args.no_satellite
+    if satellite and not args.strategy:
+        parser.error("--strategy is required unless --no-satellite is given")
+
     tickers = args.tickers or ([args.ticker] if args.ticker else None)
-    if not tickers:
+    if satellite and not tickers:
         if args.universe == "point_in_time":
             import pandas as pd
 
@@ -174,7 +195,7 @@ def main():
 
     result = run_portfolio_backtest(
         strategy_name=args.strategy,
-        tickers=tickers,
+        tickers=tickers or [],
         start_date=args.start,
         end_date=args.end,
         params=params,
@@ -182,6 +203,7 @@ def main():
         universe=args.universe,
         config=config,
         capital=args.capital,
+        satellite=satellite,
     )
     _print_summary(result, args.strategy)
 

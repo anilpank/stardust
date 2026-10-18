@@ -651,6 +651,9 @@ class PortfolioManager:
                 "breaker_days_pct": round(breaker_pct, 4),
                 "trades_total": len(trades),
                 "core_trades": sum(1 for t in trades if t.strategy_id == CORE_LANE),
+                "satellite_trades": sum(
+                    1 for t in trades if t.strategy_id != CORE_LANE
+                ),
                 "banked_total": round(
                     sum(e["bank"] for e in ratchet_events), 2
                 ),

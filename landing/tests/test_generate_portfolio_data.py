@@ -101,6 +101,21 @@ class TestBuildPayload:
         assert gen.DEFAULT_OUT.parent.name == "private"
         assert gen.DEFAULT_OUT.name == "portfolio_data.json"
 
+    def test_default_runs_include_both_controls(self):
+        ids = {r["id"] for r in gen.DEFAULT_RUNS}
+        assert "core-only-spy-10k" in ids
+        assert "satellite-only-aapl-msft-10k" in ids
+        core_only = next(r for r in gen.DEFAULT_RUNS if r["id"] == "core-only-spy-10k")
+        assert core_only["satellite"] is False
+
+    def test_core_only_spec_serializes_without_strategy(self, data_dir):
+        runs = [{"id": "c", "label": "Core only", "satellite": False, "capital": 10_000.0}]
+        payload = gen.build_payload(runs=runs, data_dir=data_dir)
+        run = payload["runs"][0]
+        assert run["strategy"] is None
+        assert run["tickers"] == []
+        assert all(t["lane"] == "core" for t in run["trades"])
+
 
 class TestSavePayload:
     def test_round_trip(self, data_dir, tmp_path):
