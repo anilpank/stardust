@@ -11,7 +11,9 @@ Conventions match TradeSimulator: signals fill at the next day's open and
 ``min(stop, open)`` so a gap below the stop fills at the gapped open rather
 than the (unreachable) stop price. Positions still open when their data (or
 the backtest window) ends are force-closed at the last close with
-``exit_reason="data_end"``.
+``exit_reason="data_end"``. When ``cash_yield`` is set, idle cash
+(everything not in a position, including the principal sleeve) accrues
+``cash_yield / 252`` per day, credited before that day's fills.
 """
 
 import math
@@ -181,6 +183,9 @@ class PortfolioManager:
         regime_prev: str | None = None
 
         for i, date in enumerate(dates):
+            if cfg.cash_yield > 0 and cash > 0:
+                cash += cash * cfg.cash_yield / 252.0
+
             sold_value = 0.0
 
             sells = [o for o in pending if o.side == "sell"]

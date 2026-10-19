@@ -1,7 +1,8 @@
 # Portfolio System Plan — personal $10–20K trading system
 
-**Status:** Active — Phase A engine ✅, backtest console ✅, control experiment ✅;
-**next: `cash_yield` engine fix, then Phase A tuning gate.**
+**Status:** Active — Phase A engine ✅, backtest console ✅, control experiment ✅,
+`cash_yield` T-bill sleeve ✅;
+**next: decide the satellite lane, then the Phase A tuning gate.**
 **Date:** October 2026
 **Owner:** Anil
 **Scope:** A personal, admin-gated trading system for a $10K–$20K account: good
@@ -14,29 +15,22 @@ serves the operator only. (Related but separate: `PAID_PRODUCT_PLAN.md`,
 
 ## Resume here (next session)
 
-Branch **`feat/spy-only-control`** holds the control experiment (pushed, awaiting
-merge to `main`). Everything green: 916 fast + landing tests pass. Pick up with
-**step 1 below**, in order:
+Branch **`feat/cash-yield`** holds the `cash_yield` engine fix (awaiting review
+and merge to `main`). Everything green: fast unit suite + landing tests pass.
+Pick up with **step 3 below**, in order:
 
-1. **Add `cash_yield` to the engine** (the one change that un-biases every
-   number — see "Known gap" under Phase A). Design:
-   - `PortfolioConfig.cash_yield: float = 0.0` (annual; off by default so today's
-     numbers stay reproducible), validated `>= 0`; the live config sets it to
-     `0.04` to match `RISK_FREE_RATE`.
-   - In `manager.py`, accrue daily interest on the **idle cash** balance
-     (`cash - invested_notional`, i.e. everything not in a position — which
-     includes the principal sleeve) at `cash_yield / 252`, credited to cash each
-     step *before* fills. The committed payload should carry both a yield-off
-     and a yield-on run so the effect is visible side by side.
-   - Tests: interest accrues on idle cash only; zero exposure compounds exactly
-     at `cash_yield`; breaker/ratchet still behave; `cash_yield=0` reproduces
-     today's numbers byte-for-byte.
-   - Re-run the decomposition (`portfolio_backtest.py --no-satellite` vs full vs
-     `core_enabled=False`) and confirm the counterfactual: Sharpes climb to
-     ~+0.45–0.50, CAGR +2.5–3pp.
-2. **Re-generate the console payload** (`landing/generate_portfolio_data.py`)
-   and re-state the verdict in the control-experiment table + README note.
-3. **Decide the satellite lane:** it adds ~+1.3–1.8pp but only on
+1. ✅ **`cash_yield` added to the engine** — `PortfolioConfig.cash_yield` (annual,
+   default `0.0`, validated `>= 0`) accrues on the **idle cash** balance
+   (everything not in a position, including the principal sleeve) at
+   `cash_yield / 252`, credited to cash each step *before* fills. The console
+   now carries yield-off and yield-on (`0.04` = `RISK_FREE_RATE`) runs side by
+   side. Tests cover idle-cash-only accrual, exact compounding at zero exposure,
+   breaker/ratchet behaviour, and byte-for-byte `cash_yield=0` reproduction.
+   Confirmed the counterfactual: Sharpes climb to ~+0.43–0.67 and CAGR
+   +2.5–4.4pp (see the table below).
+2. ✅ **Console payload regenerated** (`landing/generate_portfolio_data.py`, 8
+   runs) with the control-experiment verdict restated below.
+3. **Decide the satellite lane:** it adds ~+1.4pp but only on
    hindsight-picked tickers and cannot stand alone. Either validate it on the
    point-in-time universe (`--universe point_in_time`) or plan to drop it and
    keep core-only until it proves an edge.
@@ -45,7 +39,8 @@ merge to `main`). Everything green: 916 fast + landing tests pass. Pick up with
 
 Open questions to settle along the way: whether banked principal should earn a
 *historical* T-bill rate (era-accurate) rather than a flat 4%; and whether the
-breaker's 26–35% trip rate is still too twitchy once cash yield is in.
+breaker's trip rate (now ~6–10% with cash yield in, down from 26–42%) is still
+too twitchy.
 
 ---
 
@@ -131,27 +126,31 @@ backtested against it before freezing.
 
 `portfolio_backtest.py --no-satellite` (and `core_enabled=False` for the
 complement) splits the system so the satellite lane and the core sleeve can be
-measured on one shared window (rf = 4%, matching the metric). Runs shipped on
-branch `feat/spy-only-control` and in the console (5 runs total).
+measured on one shared 1994–2026 window (rf = 4%, matching the metric). Runs
+shipped on branch `feat/spy-only-control` and, with the `cash_yield` T-bill
+sleeve added, in the console (`landing/generate_portfolio_data.py`, 8 runs).
 
-| Run | CAGR | vol | Sharpe | maxDD | worst 12M | avg exp | breaker |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| Full — MA crossover | 4.9% | 6.5% | 0.15 | −12.4% | −8.1% | 34% | 35% |
-| Full — Donchian | 5.4% | 5.9% | 0.25 | −9.2% | −6.8% | 32% | 26% |
-| Control — core only | 3.6% | 5.3% | −0.06 | −11.4% | −6.5% | 31% | 26% |
-| Control — satellite only | 1.8% | 4.0% | −0.52 | −8.6% | −6.4% | 7% | 42% |
-| SPY buy & hold | 10.8% | 18.5% | 0.37 | −55.2% | — | — | — |
+| Run | cash_yield | CAGR | vol | Sharpe | maxDD | worst 12M | avg exp | breaker |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Full — MA crossover | 0% | 4.9% | 6.5% | 0.15 | −12.4% | −8.1% | 34% | 35% |
+| Full — MA crossover | **4%** | **8.0%** | 6.6% | **0.59** | −12.1% | **−4.7%** | 35% | 10% |
+| Full — Donchian | 0% | 5.4% | 5.9% | 0.25 | −9.2% | −6.8% | 32% | 26% |
+| Full — Donchian | **4%** | **8.2%** | 6.1% | **0.67** | −9.8% | **−4.9%** | 33% | 9% |
+| Control — core only | 0% | 3.6% | 5.3% | −0.06 | −11.4% | −6.5% | 31% | 26% |
+| Control — core only | **4%** | **6.6%** | 5.2% | **0.49** | −8.6% | −5.5% | 31% | 6% |
+| Control — satellite only | 0% | 1.8% | 4.0% | −0.52 | −8.6% | −6.4% | 7% | 42% |
+| Control — satellite only | **4%** | **6.0%** | 4.6% | **0.43** | −11.3% | −8.5% | 11% | 7% |
+| SPY buy & hold | — | 10.8% | 18.5% | 0.37 | −55.2% | — | — | — |
 
 Read: the core SPY-timing sleeve is the base engine; satellite selection adds
-~+1.3–1.8pp of CAGR on top (but on hindsight-chosen tickers) and cannot stand
-alone. All variants are drawdown-reduction vehicles, not return maximisers.
+~+1.4pp of CAGR on top (but on hindsight-chosen tickers) and cannot stand alone.
+All variants are drawdown-reduction vehicles, not return maximisers.
 
-**Known gap that biases this table against the system:** the principal/idle
-cash sleeve earns **0%** in the backtest, while the metric judges it against a
-4% risk-free rate. Crediting the T-bill sleeve (as the design specifies) lifts
-the Sharpe of every variant to ~+0.45–0.50 — above SPY's 0.37 — and raises
-CAGR by ~2.5–3pp. The `cash_yield` knob is the next engine fix (see *Resume
-here* step 1); until it lands, treat the raw-vs-SPY comparison as incomplete.
+**The `cash_yield` fix (the principal/idle-cash sleeve now earns the T-bill
+rate) closes the old bias:** every variant's Sharpe jumps above SPY's 0.37
+(0.43–0.67), CAGR rises ~2.5–4.4pp, and the full system's worst 12 months lands
+at **−4.7% to −4.9%** — inside the −5% envelope. `cash_yield=0` reproduces the
+pre-fix numbers byte-for-byte, so the two columns are directly comparable.
 
 
 ### Phase B — Shadow-run loop: journal + snapshot + admin console

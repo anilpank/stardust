@@ -378,6 +378,79 @@ class TestSlippage:
         assert trade.pnl == pytest.approx(-3.8)
 
 
+class TestCashYield:
+    def test_zero_yield_matches_default(self):
+        dates = _dates()
+        data = pd.concat([_rising("TEST", dates), _flat_frame("SPY", dates)])
+        signals = [
+            _sig("TEST", dates[2], SignalDirection.BUY),
+            _sig("TEST", dates[10], SignalDirection.SELL),
+        ]
+        base = PortfolioManager(_cfg()).run(signals, data)
+        explicit = PortfolioManager(_cfg(cash_yield=0.0)).run(signals, data)
+        pd.testing.assert_series_equal(base.equity_curve, explicit.equity_curve)
+        assert base.metrics == explicit.metrics
+
+    def test_idle_cash_compounds_exactly_at_cash_yield(self):
+        dates = _dates(20)
+        data = pd.concat([_flat_frame("TEST", dates), _flat_frame("SPY", dates)])
+        result = PortfolioManager(_cfg(cash_yield=0.04)).run([], data)
+        expected = 10_000.0 * (1.0 + 0.04 / 252.0) ** len(dates)
+        assert result.metrics["equity_end"] == pytest.approx(expected, abs=0.01)
+
+    def test_interest_is_credited_on_idle_cash_only(self):
+        dates = _dates()
+        data = pd.concat([_flat_frame("TEST", dates), _flat_frame("SPY", dates)])
+        signals = [_sig("TEST", dates[1], SignalDirection.BUY)]
+        result = PortfolioManager(_cfg(cash_yield=0.04)).run(signals, data)
+        daily = result.daily.set_index("date")
+
+        first_cash = daily["cash"].iloc[0]
+        assert first_cash == pytest.approx(10_000.0 * (1.0 + 0.04 / 252.0))
+
+        cash_after_fill = float(daily.loc[dates[2], "cash"])
+        assert cash_after_fill == pytest.approx(
+            10_000.0 * (1.0 + 0.04 / 252.0) ** 3 - 2_000.0
+        )
+        cash_later = float(daily.loc[dates[5], "cash"])
+        assert cash_later == pytest.approx(
+            cash_after_fill * (1.0 + 0.04 / 252.0) ** 3
+        )
+
+    def test_ratchet_banks_half_of_interest_gain(self):
+        dates = _dates(20)
+        data = pd.concat([_flat_frame("TEST", dates), _flat_frame("SPY", dates)])
+        result = PortfolioManager(_cfg(cash_yield=0.04)).run([], data)
+        gain = result.metrics["equity_end"] - 10_000.0
+        assert len(result.ratchet_events) == 1
+        assert result.ratchet_events[0]["bank"] == pytest.approx(0.5 * gain, abs=0.01)
+
+    def test_breaker_still_trips_with_yield(self):
+        dates = _dates()
+        aaa_opens = [100.0] * 5 + [60.0] * 15
+        aaa = _price_frame(
+            "AAA", dates, aaa_opens, list(aaa_opens),
+            [o + 1.0 for o in aaa_opens], [o - 1.0 for o in aaa_opens],
+        )
+        data = pd.concat([
+            aaa,
+            _flat_frame("BBBB", dates, price=50.0),
+            _flat_frame("SPY", dates),
+        ])
+        signals = [
+            _sig("AAA", dates[1], SignalDirection.BUY),
+            _sig("BBBB", dates[5], SignalDirection.BUY),
+        ]
+        result = PortfolioManager(_cfg(cash_yield=0.04)).run(signals, data)
+
+        assert len(result.breaker_events) == 1
+        assert result.breaker_events[0]["date"] == dates[5]
+        assert result.breaker_events[0]["tripped"] is True
+        blocked = [r for r in result.rejected if r["reason"] == REASON_BREAKER]
+        assert len(blocked) == 1
+        assert blocked[0]["ticker"] == "BBBB"
+
+
 class TestCoreLane:
     def _run(self):
         dates = _dates()

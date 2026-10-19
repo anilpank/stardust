@@ -247,6 +247,7 @@
       row("Risk / trade", fmtPct(c.risk_per_trade) + " (stop " + c.stop_atr_multiple + "× ATR" + c.atr_lookback + ")") +
       row("Slots &amp; cap", c.max_positions + " max, " + fmtPct(c.max_position_pct) + " / position, min " + fmtMoney(c.min_position_notional)) +
       row("Slippage", c.slippage_bps + " bps") +
+      row("Cash yield", c.cash_yield ? fmtPct(c.cash_yield) + " on idle cash" : "off") +
       row("Breaker", "−" + fmtPct(c.breaker_pct) + " off HWM, reopen +" + fmtPct(c.breaker_reopen_offset) + " / " + c.breaker_cooldown_days + "d cooldown") +
       row("Ratchet", fmtPct(c.ratchet_rate) + " of gains above HWM, monthly") +
       row("Principal sleeve", fmtPct(c.principal_start_pct) + " at start → " + fmtMoney(m.principal_end) + " end") +

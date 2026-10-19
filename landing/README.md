@@ -352,12 +352,17 @@ Same Basic-auth guard as `/admin`; nothing about it is public.
 - **Per-year returns, config & gate panel, trades table** (filter by lane /
   ticker / exit reason), **monthly ratchet** and **breaker event** logs.
 
+The run selector also pairs the yield-off baseline with **T-bill** variants
+(idle cash, including the principal sleeve, earns 4% instead of 0%), so the
+`cash_yield` effect on CAGR/Sharpe/worst-12-months is visible side by side — see
+the control-experiment table in `PORTFOLIO_SYSTEM_PLAN.md`.
+
 Like the demo data, the page serves a **committed JSON file** — the server
 never runs the engine. Regenerate after refreshing price data:
 
 ```bash
 # from the repo root
-python landing/generate_portfolio_data.py   # writes landing/private/portfolio_data.json (~2 MB)
+python landing/generate_portfolio_data.py   # writes landing/private/portfolio_data.json (~4 MB)
 ```
 
 The payload lives in `landing/private/`, which is committed but **never served

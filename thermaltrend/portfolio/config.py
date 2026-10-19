@@ -21,6 +21,7 @@ class PortfolioConfig:
     stop_atr_multiple: float = 2.0
     atr_lookback: int = 14
     slippage_bps: float = 5.0
+    cash_yield: float = 0.0
     principal_start_pct: float = 0.50
     ratchet_rate: float = 0.5
     breaker_pct: float = 0.05
@@ -51,6 +52,8 @@ class PortfolioConfig:
             raise ValueError("stop_atr_multiple must be > 0 (stops are mandatory)")
         if self.slippage_bps < 0:
             raise ValueError("slippage_bps must be >= 0")
+        if self.cash_yield < 0:
+            raise ValueError("cash_yield must be >= 0")
         if not 0.0 <= self.principal_start_pct <= 1.0:
             raise ValueError("principal_start_pct must be in [0, 1]")
         if not 0.0 <= self.ratchet_rate <= 1.0:
