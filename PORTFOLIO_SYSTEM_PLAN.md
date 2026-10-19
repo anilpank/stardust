@@ -1,8 +1,9 @@
 # Portfolio System Plan — personal $10–20K trading system
 
 **Status:** Active — Phase A engine ✅, backtest console ✅, control experiment ✅,
-`cash_yield` T-bill sleeve ✅, satellite lane **shelved** (PIT validation failed);
-**next: Phase A tuning gate → freeze `live_config` (core-only).**
+`cash_yield` T-bill sleeve ✅, satellite lane **shelved** (PIT validation failed),
+Phase A tuning gate ✅ — `live_config` **frozen** (core-only), gate **PASS**;
+**next: Phase B — shadow-run loop (journal + snapshot + live console).**
 **Date:** October 2026
 **Owner:** Anil
 **Scope:** A personal, admin-gated trading system for a $10K–$20K account: good
@@ -15,9 +16,10 @@ serves the operator only. (Related but separate: `PAID_PRODUCT_PLAN.md`,
 
 ## Resume here (next session)
 
-Branch **`feat/pit-satellite`** holds the satellite decision (awaiting review and
-merge to `main`). Everything green: fast unit suite + landing tests pass. Pick
-up with **step 4 below**:
+Steps 1–4 are done and merged to `main`. The frozen core-only config is committed
+at `thermaltrend/portfolio/live_config.json` and surfaced as the
+`live-core-only-10k` run in the console. Everything green: fast unit suite +
+landing tests pass. Pick up with **Phase B (step 5 below)**:
 
 1. ✅ **`cash_yield` added to the engine** — `PortfolioConfig.cash_yield` (annual,
    default `0.0`, validated `>= 0`) accrues on the **idle cash** balance
@@ -39,8 +41,18 @@ up with **step 4 below**:
    stays off until a ranked/consensus selector proves an edge on PIT. (Caveat:
    the current selector is unranked "first signal wins", so a ranked selector
    remains untested — not disproven.)
-4. **Next** run the Phase A tuning gate (item 3): tune risk knobs on train
-   windows, sanity-check walk-forward, freeze `live_config` as **core-only**.
+4. ✅ **Phase A tuning gate** — `thermaltrend/portfolio_tune.py` walk-forward
+   tunes only the knobs that actually bind for core-only (`core_target_weight`,
+   `core_momentum_lookback`, `breaker_pct`; the band, principal sleeve and regime
+   thresholds are inert without a satellite lane) on rolling 10y train / 3y test
+   windows, selecting **max Calmar subject to a −5% worst-12M envelope**, under
+   10 bps slippage + 4% cash yield. All 7 held-out windows met the envelope;
+   held-out OOS = 5.4% CAGR / 0.41 Sharpe / −5.9% maxDD / −1.4% worst-12M. Froze
+   the most-recent-refit winner to `live_config.json`: `core_target_weight 0.25`,
+   `core_momentum_lookback 189`, `breaker_pct 0.04` (full history 6.0% CAGR,
+   −3.7% worst-12M, Calmar 0.74) — gate **PASS**. See the tuning-gate table below.
+5. **Next** Phase B (steps 6–9): shadow-run loop — journal tables + guarded admin
+   API, offline snapshot generator, and the live half of `/admin/portfolio`.
 
 Open questions to settle along the way: whether banked principal should earn a
 *historical* T-bill rate (era-accurate) rather than a flat 4%; whether the
@@ -77,7 +89,7 @@ No market system guarantees principal. What this system delivers instead:
 | Start mode | **Shadow/paper first** (4–8 weeks through the full loop), then live with the ratchet |
 | Execution | **Manual** — the system proposes, the operator executes at next open and confirms; no broker automation (per `PAID_PRODUCT_PLAN.md` locked decisions) |
 
-### Risk rules (defaults — tuned in Phase A validation, then frozen)
+### Risk rules (frozen in Phase A — see `thermaltrend/portfolio/live_config.json`)
 
 - Per-trade risk ≤ **0.75–1% of total capital** (entry → 2×ATR(14) stop distance).
 - Equity exposure band **25–65%** of total capital; rest always in principal.
@@ -102,7 +114,7 @@ backtested against it before freezing.
 
 ## 2. Phases
 
-### Phase A — Portfolio engine + measured safety envelope *(engine ✅ · tuning gate pending)*
+### Phase A — Portfolio engine + measured safety envelope *(engine ✅ · tuning gate ✅)*
 
 1. **`thermaltrend/portfolio/`** (implements ROADMAP Phase 4):
    - `sizing.py` — fixed-fractional risk sizing, notional caps, whole shares,
@@ -119,10 +131,12 @@ backtested against it before freezing.
    runs the whole system over history for $10K and $20K → per-year returns,
    worst 12 months, maxDD, exposure, vs SPY — across regimes (2020, 2022; 2008
    with the point-in-time universe where data allows).
-3. **Validation gate (next after `cash_yield`):** tune only risk knobs on train
-   windows, sanity-check walk-forward, **freeze** `live_config`. Proceed to Phase
-   B only if the measured worst-year envelope is within ~−5% of total capital
-   under realistic slippage; otherwise tighten band/breaker and re-run.
+3. **Validation gate ✅** (`thermaltrend/portfolio_tune.py`): tunes only the risk
+   knobs that bind for core-only on rolling train windows, sanity-checks
+   walk-forward, and **froze** `thermaltrend/portfolio/live_config.json`. The
+   measured worst-year envelope is inside ~−5% of total capital under realistic
+   (10 bps) slippage, so the gate passes and Phase B can proceed. See the
+   tuning-gate table below.
 4. **Tests:** sizing math, breaker/ratchet transitions, cash/exposure
    invariants (cash ≥ 0, cash ≥ principal target, exposure ≤ band, integer
    shares), CLI smoke tests.
@@ -181,6 +195,38 @@ an edge on the point-in-time universe. Caveat: the current selector is unranked
 "first signal wins" among ~1200 tickers, so this refutes the lane *as
 implemented*, not the idea categorically.
 
+#### Phase A tuning gate (step 4) — `live_config` frozen ✅
+
+`thermaltrend/portfolio_tune.py`: rolling **10y train / 3y test** windows over
+SPY (1993–2026), re-fitting only the knobs that bind for core-only
+(`core_target_weight`, `core_momentum_lookback`, `breaker_pct`; the band,
+principal sleeve and regime thresholds are inert without a satellite lane). On
+each train window it picks the config with **max Calmar subject to worst-12M
+≥ −5%**, then scores it held-out. Assumptions: **10 bps** slippage, cash yield
+= `RISK_FREE_RATE` (4%). All 7 held-out windows cleared the envelope (no
+fallback):
+
+| Test window | Chosen on train | IS Calmar | OOS CAGR | OOS Sharpe | OOS maxDD | OOS worst 12M | OOS Calmar |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 2005-10 → 2008-10 | 0.25 / 126 / 4% | 1.23 | 5.1% | 0.38 | −2.5% | +1.9% | 2.05 |
+| 2008-10 → 2011-10 | 0.25 / 126 / 4% | 1.50 | 3.4% | −0.23 | −4.7% | +0.2% | 0.72 |
+| 2011-10 → 2014-10 | 0.30 / 126 / 4% | 0.99 | 8.0% | 1.06 | −2.5% | +4.8% | 3.18 |
+| 2014-10 → 2017-10 | 0.30 / 126 / 4% | 1.25 | 5.0% | 0.28 | −3.1% | −1.4% | 1.60 |
+| 2017-10 → 2020-10 | 0.30 / 126 / 4% | 1.21 | 3.7% | −0.07 | −5.9% | +0.1% | 0.62 |
+| 2020-10 → 2023-10 | 0.25 / 126 / 4% | 1.10 | 5.2% | 0.38 | −2.8% | −0.3% | 1.84 |
+| 2023-10 → 2026-10 | 0.25 / 189 / 5% | 1.07 | 7.9% | 1.07 | −4.0% | +3.5% | 2.00 |
+
+*Chosen config shown as `core_target_weight / core_momentum_lookback /
+breaker_pct`.*
+
+- **Held-out OOS (concatenated):** 5.4% CAGR, 0.41 Sharpe, −5.9% maxDD,
+  **−1.4% worst-12M**, Calmar 0.93 — no IS→OOS collapse.
+- **Frozen `live_config`** (most-recent-refit winner, full history): 5.9% CAGR,
+  −8.1% maxDD, **−3.7% worst-12M**, Calmar 0.73 → inside the −5% envelope.
+- **Gate: PASS** — under realistic slippage the worst-year loss is ~−3.7% of
+  total capital, well within the −5% target, so Phase B can proceed. The tuned
+  config is more conservative than the hand-set default (0.25 vs 0.40 core
+  weight), trading ~0.6pp of CAGR for a much shallower envelope.
 
 ### Phase B — Shadow-run loop: journal + snapshot + admin console
 
