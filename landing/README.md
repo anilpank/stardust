@@ -42,7 +42,8 @@ That's it — the first pulls the latest code, the second updates the app, resta
 | `styles.css` | Styling (dark fintech theme, responsive). |
 | `app.js` | Ticker lookup, matrix rendering, funnel tracking, signup. |
 | `admin.html` / `admin.js` / `admin.css` | Read-only console: KPIs, funnel, leads, events. |
-| `admin_portfolio.html` / `portfolio.js` / `portfolio.css` | Portfolio console (`/admin/portfolio`): backtest KPIs, SVG charts, trades. |
+| `admin_portfolio.html` / `portfolio.js` / `portfolio.css` | Portfolio console (`/admin/portfolio`): live shadow run + backtest KPIs, SVG charts, trades. |
+| `live.js` | Live half of the console: snapshot KPIs, proposal + Acted/Skipped form, positions, journal log. |
 | `server.py` | Flask app: serves the page + `/api/signup`, `/api/track`, `/api/demo`, `/api/trades`, `/api/quote`, `/admin`, `/admin/portfolio`, and the admin-gated `/api/admin/trade/*` shadow-run journal. |
 | `gen_admin_password.py` | Generates an `ADMIN_PASS_HASH` (`salt:hash`) for admin Basic auth. |
 | `generate_demo_data.py` | Runs the real engine → writes `demo_signals.json` + `demo_trades.json`. |
@@ -336,11 +337,26 @@ one IP, further logins are locked out for 5 minutes. Basic auth covers
 
 ---
 
-## Portfolio console — backtests behind the same admin auth
+## Portfolio console — live shadow run + backtests, same admin auth
 
 **http://127.0.0.1:8000/admin/portfolio** renders the personal portfolio
-system's backtests (see `PORTFOLIO_SYSTEM_PLAN.md` and `thermaltrend/portfolio/`).
-Same Basic-auth guard as `/admin`; nothing about it is public.
+system (see `PORTFOLIO_SYSTEM_PLAN.md` and `thermaltrend/portfolio/`). Same
+Basic-auth guard as `/admin`; nothing about it is public. Two halves:
+
+**Live shadow run** (top, `live.js` + `GET /api/admin/portfolio/snapshot`) is the
+daily brief, fed by the committed `private/portfolio_snapshot.json`:
+
+- **KPI cards** — live equity, day P&L, total return/CAGR/maxDD, cash, positions,
+  adherence %, and the model's equity for comparison.
+- **Next session** — the core proposal (side, ticker, reason, target weight, ref
+  price, session) with **Acted + fill / Skipped / Deferred** buttons. *Acted* posts
+  a `journal_decisions` row (`action=acted`) **and** a `journal_fills` row; the
+  others post a decision only.
+- **Positions** table (shares, avg entry, last, value, unrealized, stop) and the
+  live **journal fills / decisions** tables (from `/api/admin/trade/*`), with CSV
+  export links. Positions/stops come from the snapshot; the journal is live.
+
+**Backtest viewer** (below) is the Phase A picture:
 
 - **Run selector** — switches between the configured backtest runs.
 - **KPI cards** — equity path, CAGR, Sharpe, maxDD, **worst 12 months** (the

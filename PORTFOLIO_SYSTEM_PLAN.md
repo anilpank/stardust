@@ -3,7 +3,8 @@
 **Status:** Active — Phase A engine ✅, backtest console ✅, control experiment ✅,
 `cash_yield` T-bill sleeve ✅, satellite lane **shelved** (PIT validation failed),
 Phase A tuning gate ✅ — `live_config` **frozen** (core-only), gate **PASS**;
-**next: Phase B — shadow-run loop (journal ✅ → snapshot ✅ → live console).**
+**next: Phase B — shadow-run loop (journal ✅ → snapshot ✅ → live console ✅) →
+automation (step 9) then Phase C.**
 **Date:** October 2026
 **Owner:** Anil
 **Scope:** A personal, admin-gated trading system for a $10K–$20K account: good
@@ -16,11 +17,11 @@ serves the operator only. (Related but separate: `PAID_PRODUCT_PLAN.md`,
 
 ## Resume here (next session)
 
-Steps 1–6 are done and merged to `main`; step 7 (snapshot generator) is on branch
-`feat/phase-b-snapshot`. The frozen core-only config is committed at
+Steps 1–7 are done and merged to `main`; step 8 (live console) is on branch
+`feat/phase-b-live-console`. The frozen core-only config is committed at
 `thermaltrend/portfolio/live_config.json` and surfaced as the `live-core-only-10k`
 run in the console. Everything green: fast unit suite + landing tests pass. Pick
-up with **Phase B step 8 (live console)**:
+up with **Phase B step 9 (automation)**:
 
 1. ✅ **`cash_yield` added to the engine** — `PortfolioConfig.cash_yield` (annual,
    default `0.0`, validated `>= 0`) accrues on the **idle cash** balance
@@ -52,10 +53,16 @@ up with **Phase B step 8 (live console)**:
    the most-recent-refit winner to `live_config.json`: `core_target_weight 0.25`,
    `core_momentum_lookback 189`, `breaker_pct 0.04` (full history 6.0% CAGR,
    −3.7% worst-12M, Calmar 0.74) — gate **PASS**. See the tuning-gate table below.
-5. **Next** Phase B step 8 — the live half of `/admin/portfolio`: today's KPI
-   cards (equity, day P&L, adherence %), positions table with stops, the
-   next-session proposal with Acted/Skipped + a fill form posting to
-   `/api/admin/trade/*`, and a trade log fed by the snapshot's `fills`.
+5. ✅ **Live console** (step 8, branch `feat/phase-b-live-console`): the top of
+   `/admin/portfolio` is now the daily brief, fed by the committed
+   `private/portfolio_snapshot.json` through the guarded
+   `GET /api/admin/portfolio/snapshot`: KPI cards (live equity, day P&L, total
+   return/CAGR/maxDD, cash, positions, adherence %, model equity), the
+   next-session **proposal** with **Acted + fill / Skipped / Deferred** buttons
+   (Acted posts a `journal_decisions` row *and* a `journal_fills` row; the others
+   a decision only), a positions table, and the live journal fills/decisions
+   tables with CSV export links. Frontend logic is a new `live.js` (+ CSS);
+   `portfolio.js` (the backtest viewer below the divider) is untouched.
 6. ✅ **Journal tables + guarded API** (step 6, branch `feat/phase-b-journal`):
    append-only `journal_fills` / `journal_decisions` in `landing.db`, with
    admin-gated `GET/POST /api/admin/trade/fills`, `GET/POST
@@ -268,17 +275,19 @@ breaker_pct`.*
    `landing/private/portfolio_snapshot.json` + the next-session proposal. The
    live ledger starts at the first fill (no flat pre-history) and reports
    rejected fills (sells with no position, non-positive price/shares).
-8. **Admin console** `/admin/portfolio` on the landing stack (Flask + static
+8. ✅ **Admin console** `/admin/portfolio` on the landing stack (Flask + static
    HTML/JS/CSS, same Basic auth; hand-rolled SVG — no chart dependency):
-   **backtest viewer done** — run selector, KPI cards, equity-vs-SPY chart,
+   **backtest viewer** — run selector, KPI cards, equity-vs-SPY chart,
    exposure/breaker/regime strip, per-year returns, config/gate panel, trades,
    ratchet and breaker logs, fed by committed
    `landing/private/portfolio_data.json` (offline
    `landing/generate_portfolio_data.py`; `private/` is never served statically).
-   Still to build here: the live shadow-run half — KPI cards for *today*
-   (equity, day P&L, adherence %), positions table with stops, proposals with
-   Acted/Skipped + fill form, trade log + CSV export — which needs the journal
-   tables from step 6–7 first.
+   **Live shadow-run half** — KPI cards for *today* (equity, day P&L, adherence
+   %), positions table, next-session proposal with Acted/Skipped + fill form,
+   live journal trade log + CSV export — fed by committed
+   `landing/private/portfolio_snapshot.json` (offline
+   `landing/generate_portfolio_snapshot.py`) and the live `/api/admin/trade/*`
+   endpoints. See "Resume here" item 5 for the layout.
 9. **Automation:** local launchd/cron — `update_data.py` → snapshot generator →
    commit. Documented, not forced.
 

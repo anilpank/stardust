@@ -61,6 +61,7 @@ EVENTS_CSV = DATA_DIR / "events.csv"
 DEMO_JSON = BASE_DIR / "demo_signals.json"
 TRADES_JSON = BASE_DIR / "demo_trades.json"
 PORTFOLIO_JSON = BASE_DIR / "private" / "portfolio_data.json"
+SNAPSHOT_JSON = BASE_DIR / "private" / "portfolio_snapshot.json"
 
 # Delayed quotes for the prototype, proxied from Yahoo Finance. Results are
 # cached so a burst of lookups on the same ticker hits Yahoo once; failures are
@@ -729,6 +730,19 @@ def admin_portfolio_data():
     if not PORTFOLIO_JSON.exists():
         return jsonify({"ok": False, "available": False}), 404
     resp = send_file(PORTFOLIO_JSON, mimetype="application/json")
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
+
+
+@app.get("/api/admin/portfolio/snapshot")
+def admin_portfolio_snapshot():
+    """Serve the pre-generated shadow-run snapshot (never runs the engine)."""
+    guard = _admin_guard()
+    if guard:
+        return guard
+    if not SNAPSHOT_JSON.exists():
+        return jsonify({"ok": False, "available": False}), 404
+    resp = send_file(SNAPSHOT_JSON, mimetype="application/json")
     resp.headers["Cache-Control"] = "no-store"
     return resp
 
