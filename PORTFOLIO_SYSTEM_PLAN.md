@@ -3,8 +3,8 @@
 **Status:** Active — Phase A engine ✅, backtest console ✅, control experiment ✅,
 `cash_yield` T-bill sleeve ✅, satellite lane **shelved** (PIT validation failed),
 Phase A tuning gate ✅ — `live_config` **frozen** (core-only), gate **PASS**;
-**next: Phase B — shadow-run loop (journal ✅ → snapshot ✅ → live console ✅) →
-automation (step 9) then Phase C.**
+**Phase B (shadow-run loop) complete: journal ✅ → snapshot ✅ → live console ✅
+→ automation ✅. Next: Phase C — run the multi-week shadow window (operator-driven).**
 **Date:** October 2026
 **Owner:** Anil
 **Scope:** A personal, admin-gated trading system for a $10K–$20K account: good
@@ -17,11 +17,14 @@ serves the operator only. (Related but separate: `PAID_PRODUCT_PLAN.md`,
 
 ## Resume here (next session)
 
-Steps 1–7 are done and merged to `main`; step 8 (live console) is on branch
-`feat/phase-b-live-console`. The frozen core-only config is committed at
+**Phase B is complete.** Steps 6–9 live on short-lived branches off `main` and
+await your merge (the running log below records each); steps 1–5 are already on
+`main`. The frozen core-only config is committed at
 `thermaltrend/portfolio/live_config.json` and surfaced as the `live-core-only-10k`
-run in the console. Everything green: fast unit suite + landing tests pass. Pick
-up with **Phase B step 9 (automation)**:
+run in the console. Everything green: fast unit suite + landing tests pass.
+**Nothing is left to build** — next is **Phase C**: run the multi-week shadow
+window (operator-driven; the step-9 automation is documented, not enabled). The
+running log:
 
 1. ✅ **`cash_yield` added to the engine** — `PortfolioConfig.cash_yield` (annual,
    default `0.0`, validated `>= 0`) accrues on the **idle cash** balance
@@ -84,6 +87,13 @@ up with **Phase B step 9 (automation)**:
    the model's core trades as the paper fills (no journal required); **`live`
    mode** replays the operator's journal fills. Tests:
    `landing/tests/test_generate_portfolio_snapshot.py`.
+8. ✅ **Automation** (step 9, branch `feat/phase-b-automation`):
+   `landing/shadow_run.py` chains `update_data.py` → the snapshot generator →
+   (opt-in) `git commit`, never pushes, and refuses to commit on `main`/`master`
+   without `--allow-main`. launchd plist + cron recipes documented in
+   `landing/README.md` ("Shadow-run automation"). Tests:
+   `landing/tests/test_shadow_run.py` (command build, flag forwarding, commit
+   gating, main-branch guard, no-op when unchanged).
 
 Open questions to settle along the way: whether banked principal should earn a
 *historical* T-bill rate (era-accurate) rather than a flat 4%; whether the
@@ -288,8 +298,12 @@ breaker_pct`.*
    `landing/private/portfolio_snapshot.json` (offline
    `landing/generate_portfolio_snapshot.py`) and the live `/api/admin/trade/*`
    endpoints. See "Resume here" item 5 for the layout.
-9. **Automation:** local launchd/cron — `update_data.py` → snapshot generator →
-   commit. Documented, not forced.
+9. ✅ **Automation:** `landing/shadow_run.py` chains `update_data.py` → snapshot
+   generator → (opt-in) commit, never pushes, and refuses to commit on
+   `main`/`master` without `--allow-main`. launchd plist + cron recipes and the
+   CLI are documented in `landing/README.md` → "Shadow-run automation".
+   Documented, not forced — the operator enables it when the shadow window
+   starts.
 
 ### Phase C — Run it (operator-driven)
 

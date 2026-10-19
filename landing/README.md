@@ -49,6 +49,7 @@ That's it — the first pulls the latest code, the second updates the app, resta
 | `generate_demo_data.py` | Runs the real engine → writes `demo_signals.json` + `demo_trades.json`. |
 | `generate_portfolio_data.py` | Runs the portfolio engine → writes `private/portfolio_data.json`. |
 | `generate_portfolio_snapshot.py` | Shadow-run loop: runs the frozen model, reads the journal, writes `private/portfolio_snapshot.json`. |
+| `shadow_run.py` | Daily-loop orchestrator (`update_data.py` → snapshot → optional commit) for launchd/cron. |
 | `demo_signals.json` | Pre-computed winning strategy per ticker × timeframe + OOS badge, latest close, and each call's signal date/price/return-since. |
 | `demo_trades.json` | Pre-computed actual trades per ticker × timeframe (powers the drill-down). |
 | `generate_ticker_index.py` | Builds `tickers.json` (ticker → company name) from the membership table. |
@@ -435,7 +436,7 @@ Fill posts are validated (`ticker` looks like a symbol, `side ∈ {buy,sell}`,
 ### Snapshot generator
 
 `landing/generate_portfolio_snapshot.py` turns the journal into the daily brief
-the live half of `/admin/portfolio` will render (step 8). It runs the **frozen
+the live half of `/admin/portfolio` renders (step 8). It runs the **frozen
 core-only model** (`thermaltrend/portfolio/live_config.json`) as what the system
 *would* do, loads the operator's journal through the guarded export endpoints
 (or a local dir), replays the fills into a **live ledger** marked to market from
@@ -459,6 +460,73 @@ python landing/generate_portfolio_snapshot.py --journal-dir /tmp/journal   # off
   exposure match, rejected fills), and the flattened `fills` log.
 - The server never runs the engine at request time — same pattern as
   `generate_portfolio_data.py`. Regenerate after refreshing price data.
+
+### Shadow-run automation
+
+`landing/shadow_run.py` chains the daily loop — refresh prices, rebuild the
+snapshot, optionally commit — so it can run unattended (launchd on macOS, cron
+on Linux). It never pushes, and it **refuses to commit on `main`/`master`**
+unless you pass `--allow-main`, so the operator still reviews and merges:
+
+```bash
+# from the repo root
+python landing/shadow_run.py                 # update prices + snapshot (no commit)
+python landing/shadow_run.py --skip-data     # snapshot only (prices already fresh)
+python landing/shadow_run.py --mode live \
+  --base-url http://127.0.0.1:8000           # replay the live journal
+python landing/shadow_run.py --commit        # also commit on the current branch
+```
+
+`--commit` stages `thermaltrend/data*` and `landing/private/portfolio_snapshot.json`
+only, commits `chore: shadow-run update <date>` (override with `--message`), and
+no-ops when nothing changed. Everything else forwards to the snapshot generator
+(`--data-dir`, `--config`, `--out`, `--journal-dir`, `--user`, `--password`,
+`--start`, `--end`).
+
+**macOS (launchd).** Write `~/Library/LaunchAgents/com.stardust.shadow.plist`
+(adjust the repo path) and load it with
+`launchctl load ~/Library/LaunchAgents/com.stardust.shadow.plist` — here it runs at
+06:30 local, weekdays only:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>com.stardust.shadow</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/bin/python3</string>
+    <string>/Users/you/stardust/landing/shadow_run.py</string>
+    <string>--mode</string><string>paper</string>
+    <string>--commit</string>
+  </array>
+  <key>WorkingDirectory</key><string>/Users/you/stardust</string>
+  <key>EnvironmentVariables</key>
+  <dict><key>ADMIN_PASSWORD</key><string>…</string></dict>
+  <key>StartCalendarInterval</key>
+  <array>
+    <dict><key>Weekday</key><integer>1</integer><key>Hour</key><integer>6</integer><key>Minute</key><integer>30</integer></dict>
+    <dict><key>Weekday</key><integer>2</integer><key>Hour</key><integer>6</integer><key>Minute</key><integer>30</integer></dict>
+    <dict><key>Weekday</key><integer>3</integer><key>Hour</key><integer>6</integer><key>Minute</key><integer>30</integer></dict>
+    <dict><key>Weekday</key><integer>4</integer><key>Hour</key><integer>6</integer><key>Minute</key><integer>30</integer></dict>
+    <dict><key>Weekday</key><integer>5</integer><key>Hour</key><integer>6</integer><key>Minute</key><integer>30</integer></dict>
+  </array>
+  <key>StandardOutPath</key><string>/tmp/stardust-shadow.log</string>
+  <key>StandardErrorPath</key><string>/tmp/stardust-shadow.log</string>
+</dict></plist>
+```
+
+**Linux (cron).** Mirror the same command, e.g. weekdays at 06:30:
+
+```cron
+30 6 * * 1-5 cd /root/stardust && ADMIN_PASSWORD=… /usr/bin/python3 landing/shadow_run.py --mode paper --commit >>/tmp/stardust-shadow.log 2>&1
+```
+
+The loop is **documented, not forced** — enable it when you start the multi-week
+shadow window. Until then, run `shadow_run.py` (or the generator directly) by
+hand each evening. Whichever you use, the landing server must be running with the
+journal endpoints reachable when `--mode live` reads fills over HTTP.
 
 ---
 
