@@ -360,6 +360,16 @@ re-run the satellite strategies over the full point-in-time universe (1206
 tickers), where the satellite lane fails validation; those runs make the
 resulting decision — core-only is the base — visible in the console.
 
+The **`LIVE — tuned core-only`** run (first in the selector) is the Phase A gate
+output: it loads the frozen config from `thermaltrend/portfolio/live_config.json`
+(`config_path` in the run spec) rather than rebuilding it inline, so the console
+can never drift from what would actually run live. The frozen `live_config.json`
+is produced by `thermaltrend/portfolio_tune.py` (rolling walk-forward tuning of
+the core-only risk knobs under a −5% worst-12M envelope and 10 bps slippage); the
+gate **passed** at a −3.7% full-history worst 12-months. See the tuning-gate
+table in `PORTFOLIO_SYSTEM_PLAN.md`. Re-run the tuner, then regenerate the
+payload, whenever price data changes.
+
 Like the demo data, the page serves a **committed JSON file** — the server
 never runs the engine. Regenerate after refreshing price data (the point-in-time
 runs make this take ~2 minutes):

@@ -25,14 +25,30 @@ import pandas as pd
 
 from thermaltrend.analytics.metrics import RISK_FREE_RATE
 from thermaltrend.backtest import DEFAULT_MEMBERSHIP_PATH
-from thermaltrend.portfolio.config import PortfolioConfig
+from thermaltrend.portfolio.config import PortfolioConfig, load_config
 from thermaltrend.portfolio_backtest import run_portfolio_backtest
 
 BASE_DIR = Path(__file__).resolve().parent
 DEFAULT_OUT = BASE_DIR / "private" / "portfolio_data.json"
 DEFAULT_DATA_DIR = BASE_DIR.parent / "thermaltrend" / "data" / "equities"
+# Phase A gate output (step 4): the frozen core-only risk-knob config.
+LIVE_CONFIG_PATH = (
+    BASE_DIR.parent / "thermaltrend" / "portfolio" / "live_config.json"
+)
 
 DEFAULT_RUNS = [
+    # The deployed configuration after the Phase A tuning gate: core-only with
+    # the risk knobs chosen by walk-forward (see thermaltrend/portfolio_tune.py).
+    # Loaded from the committed frozen config so the console can never drift
+    # from what would actually run live.
+    {
+        "id": "live-core-only-10k",
+        "label": "LIVE — tuned core-only (Phase A gate) · $10K",
+        "satellite": False,
+        "capital": 10_000.0,
+        "start": "1994-01-03",
+        "config_path": str(LIVE_CONFIG_PATH),
+    },
     {
         "id": "ma-crossover-aapl-msft-10k",
         "label": "MA crossover · AAPL + MSFT · $10K",
@@ -260,7 +276,10 @@ def build_payload(
     core_cache: dict[str, pd.Series | None] = {}
     payload_runs = []
     for spec in specs:
-        run_config = spec.get("config", config)
+        if spec.get("config_path"):
+            run_config = load_config(spec["config_path"])
+        else:
+            run_config = spec.get("config", config)
         core_ticker = (run_config or PortfolioConfig()).core_ticker
         if core_ticker not in core_cache:
             core_cache[core_ticker] = _load_core_closes(data_dir, core_ticker)

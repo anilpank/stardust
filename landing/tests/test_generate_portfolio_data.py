@@ -171,6 +171,40 @@ class TestBuildPayload:
         assert run["tickers"] == []
         assert all(t["lane"] == "core" for t in run["trades"])
 
+    def test_default_runs_include_frozen_live_config(self):
+        from thermaltrend.analytics.metrics import RISK_FREE_RATE
+
+        live = next(r for r in gen.DEFAULT_RUNS if r["id"] == "live-core-only-10k")
+        assert live["satellite"] is False
+        assert Path(live["config_path"]).exists()
+        frozen = gen.load_config(live["config_path"])
+        assert frozen.core_enabled is True
+        assert frozen.slippage_bps == 10.0
+        assert frozen.cash_yield == RISK_FREE_RATE
+
+    def test_config_path_run_loads_frozen_config(self, data_dir, tmp_path):
+        from thermaltrend.portfolio.config import PortfolioConfig, save_config
+
+        cfg = PortfolioConfig(
+            core_target_weight=0.25, slippage_bps=10.0, cash_yield=0.04
+        )
+        path = tmp_path / "live.json"
+        save_config(cfg, path)
+        runs = [
+            {
+                "id": "live",
+                "label": "Live",
+                "satellite": False,
+                "start": "2025-01-02",
+                "config_path": str(path),
+            }
+        ]
+        payload = gen.build_payload(runs=runs, data_dir=data_dir)
+        run = payload["runs"][0]
+        assert run["config"]["core_target_weight"] == 0.25
+        assert run["config"]["slippage_bps"] == 10.0
+        assert run["config"]["cash_yield"] == 0.04
+
 
 class TestSavePayload:
     def test_round_trip(self, data_dir, tmp_path):
