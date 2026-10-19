@@ -1,8 +1,8 @@
 # Portfolio System Plan — personal $10–20K trading system
 
 **Status:** Active — Phase A engine ✅, backtest console ✅, control experiment ✅,
-`cash_yield` T-bill sleeve ✅;
-**next: decide the satellite lane, then the Phase A tuning gate.**
+`cash_yield` T-bill sleeve ✅, satellite lane **shelved** (PIT validation failed);
+**next: Phase A tuning gate → freeze `live_config` (core-only).**
 **Date:** October 2026
 **Owner:** Anil
 **Scope:** A personal, admin-gated trading system for a $10K–$20K account: good
@@ -15,32 +15,37 @@ serves the operator only. (Related but separate: `PAID_PRODUCT_PLAN.md`,
 
 ## Resume here (next session)
 
-Branch **`feat/cash-yield`** holds the `cash_yield` engine fix (awaiting review
-and merge to `main`). Everything green: fast unit suite + landing tests pass.
-Pick up with **step 3 below**, in order:
+Branch **`feat/pit-satellite`** holds the satellite decision (awaiting review and
+merge to `main`). Everything green: fast unit suite + landing tests pass. Pick
+up with **step 4 below**:
 
 1. ✅ **`cash_yield` added to the engine** — `PortfolioConfig.cash_yield` (annual,
    default `0.0`, validated `>= 0`) accrues on the **idle cash** balance
    (everything not in a position, including the principal sleeve) at
    `cash_yield / 252`, credited to cash each step *before* fills. The console
-   now carries yield-off and yield-on (`0.04` = `RISK_FREE_RATE`) runs side by
-   side. Tests cover idle-cash-only accrual, exact compounding at zero exposure,
+   carries yield-off and yield-on (`0.04` = `RISK_FREE_RATE`) runs side by side.
+   Tests cover idle-cash-only accrual, exact compounding at zero exposure,
    breaker/ratchet behaviour, and byte-for-byte `cash_yield=0` reproduction.
    Confirmed the counterfactual: Sharpes climb to ~+0.43–0.67 and CAGR
    +2.5–4.4pp (see the table below).
-2. ✅ **Console payload regenerated** (`landing/generate_portfolio_data.py`, 8
-   runs) with the control-experiment verdict restated below.
-3. **Decide the satellite lane:** it adds ~+1.4pp but only on
-   hindsight-picked tickers and cannot stand alone. Either validate it on the
-   point-in-time universe (`--universe point_in_time`) or plan to drop it and
-   keep core-only until it proves an edge.
-4. **Only then** run the Phase A tuning gate (item 3): tune risk knobs on train
-   windows, sanity-check walk-forward, freeze `live_config`.
+2. ✅ **Console payload regenerated** (`landing/generate_portfolio_data.py`) with
+   the control-experiment verdict restated below.
+3. ✅ **Satellite lane decision: shelved.** Validated on the full point-in-time
+   universe (1206 tickers), it is value-destroying — every PIT variant is worse
+   than core-only on CAGR, Sharpe, drawdown, worst-12M and breaker days, and the
+   full PIT run *underperforms core-only* because satellite losses trip the
+   shared breaker and block the core sleeve. The earlier +1.4pp edge was
+   hindsight ticker selection. **Core-only is the base**; the satellite lane
+   stays off until a ranked/consensus selector proves an edge on PIT. (Caveat:
+   the current selector is unranked "first signal wins", so a ranked selector
+   remains untested — not disproven.)
+4. **Next** run the Phase A tuning gate (item 3): tune risk knobs on train
+   windows, sanity-check walk-forward, freeze `live_config` as **core-only**.
 
 Open questions to settle along the way: whether banked principal should earn a
-*historical* T-bill rate (era-accurate) rather than a flat 4%; and whether the
-breaker's trip rate (now ~6–10% with cash yield in, down from 26–42%) is still
-too twitchy.
+*historical* T-bill rate (era-accurate) rather than a flat 4%; whether the
+breaker's trip rate is still too twitchy; and what (if anything) could make a
+satellite lane earn its keep.
 
 ---
 
@@ -66,7 +71,7 @@ No market system guarantees principal. What this system delivers instead:
 |---|---|
 | Capital structure | **Two sleeves**: principal (cash/T-bill, untouched by trading rules) + risk sleeve |
 | Risk anchor | Largest acceptable 12-month loss on total capital: **~−5%** → exposure band **25–65%**, breaker **−5%** off equity high-water mark |
-| Return engine | **Core-satellite**: ≈60% of equity exposure in regime/absolute-momentum-timed SPY; ≈40% in 3–6 individual-stock signals (6-strategy ensemble consensus) |
+| Return engine | **Core-only**: regime/absolute-momentum-timed SPY. The core-satellite satellite lane (individual-stock signals) is **shelved** — on the point-in-time universe it destroyed value (step 3); off until a ranked/consensus selector proves an edge |
 | Profit ratchet | **Bank 50%** of gains above the last banked high-water mark, monthly, into principal |
 | Journal system of record | **Landing SQLite** (append-only, server-timestamped) via guarded admin API; local snapshot generator pulls it each run |
 | Start mode | **Shadow/paper first** (4–8 weeks through the full loop), then live with the ratchet |
@@ -151,6 +156,30 @@ rate) closes the old bias:** every variant's Sharpe jumps above SPY's 0.37
 (0.43–0.67), CAGR rises ~2.5–4.4pp, and the full system's worst 12 months lands
 at **−4.7% to −4.9%** — inside the −5% envelope. `cash_yield=0` reproduces the
 pre-fix numbers byte-for-byte, so the two columns are directly comparable.
+
+#### Point-in-time satellite validation (step 3) — lane shelved ✅
+
+Re-run over the **full point-in-time universe** (1206 membership tickers,
+1994–2026, T-bill on) instead of the hindsight tickers above. The
+hindsight-favoured satellite edge disappears and reverses — every PIT variant is
+worse than core-only on every axis:
+
+| Run | CAGR | vol | Sharpe | maxDD | worst 12M | avg exp | breaker |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| **Core only (control)** | **6.6%** | 5.2% | **0.49** | **−8.6%** | **−5.5%** | 31% | **6%** |
+| PIT full — MA crossover | 5.5% | 7.1% | 0.23 | −13.7% | −12.2% | 36% | 40% |
+| PIT satellite-only — MA crossover | 5.1% | 7.6% | 0.17 | −11.6% | −8.5% | 38% | 32% |
+| PIT full — Donchian | 6.2% | 6.6% | 0.33 | −10.3% | −6.1% | 41% | 17% |
+| PIT satellite-only — Donchian | 4.8% | 6.7% | 0.14 | −12.3% | −10.8% | 36% | 33% |
+
+The satellite lane is not merely flat but *destructive*: the full PIT runs
+**underperform core-only** (5.5% and 6.2% vs 6.6%) because satellite drawdowns
+trip the shared breaker (~40% and ~17% of days) and, with entries blocked
+account-wide, suppress the core sleeve too. **Decision: drop the satellite lane;
+core-only is the base.** It stays off until a *ranked/consensus* selector proves
+an edge on the point-in-time universe. Caveat: the current selector is unranked
+"first signal wins" among ~1200 tickers, so this refutes the lane *as
+implemented*, not the idea categorically.
 
 
 ### Phase B — Shadow-run loop: journal + snapshot + admin console

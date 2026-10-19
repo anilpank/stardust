@@ -123,6 +123,46 @@ class TestBuildPayload:
         sat = by_id["satellite-only-aapl-msft-10k-tbill"]["config"]
         assert sat.core_enabled is False and sat.cash_yield == RISK_FREE_RATE
 
+    def test_default_runs_include_point_in_time_validation(self):
+        by_id = {r["id"]: r for r in gen.DEFAULT_RUNS}
+        for rid in (
+            "pit-full-ma-crossover-10k-tbill",
+            "pit-satellite-only-ma-crossover-10k-tbill",
+            "pit-full-donchian-10k-tbill",
+            "pit-satellite-only-donchian-10k-tbill",
+        ):
+            assert rid in by_id
+            assert by_id[rid]["universe"] == "point_in_time"
+            assert not by_id[rid].get("tickers")
+        assert (
+            by_id["pit-satellite-only-ma-crossover-10k-tbill"]["config"].core_enabled
+            is False
+        )
+
+    def test_point_in_time_run_uses_membership_tickers(self, data_dir, monkeypatch):
+        seen = {}
+        real = gen.run_portfolio_backtest
+
+        def spy(**kwargs):
+            seen.update(kwargs)
+            return real(**kwargs)
+
+        monkeypatch.setattr(gen, "run_portfolio_backtest", spy)
+        monkeypatch.setattr(gen, "_membership_tickers", lambda: ["TEST"])
+        runs = [
+            {
+                "id": "pit",
+                "label": "PIT",
+                "strategy": "ma_crossover",
+                "capital": 10_000.0,
+                "start": "2025-01-02",
+                "universe": "point_in_time",
+            }
+        ]
+        gen.build_payload(runs=runs, data_dir=data_dir)
+        assert seen["universe"] == "point_in_time"
+        assert seen["tickers"] == ["TEST"]
+
     def test_core_only_spec_serializes_without_strategy(self, data_dir):
         runs = [{"id": "c", "label": "Core only", "satellite": False, "capital": 10_000.0}]
         payload = gen.build_payload(runs=runs, data_dir=data_dir)

@@ -355,14 +355,18 @@ Same Basic-auth guard as `/admin`; nothing about it is public.
 The run selector also pairs the yield-off baseline with **T-bill** variants
 (idle cash, including the principal sleeve, earns 4% instead of 0%), so the
 `cash_yield` effect on CAGR/Sharpe/worst-12-months is visible side by side — see
-the control-experiment table in `PORTFOLIO_SYSTEM_PLAN.md`.
+the control-experiment table in `PORTFOLIO_SYSTEM_PLAN.md`. The `PIT …` runs
+re-run the satellite strategies over the full point-in-time universe (1206
+tickers), where the satellite lane fails validation; those runs make the
+resulting decision — core-only is the base — visible in the console.
 
 Like the demo data, the page serves a **committed JSON file** — the server
-never runs the engine. Regenerate after refreshing price data:
+never runs the engine. Regenerate after refreshing price data (the point-in-time
+runs make this take ~2 minutes):
 
 ```bash
 # from the repo root
-python landing/generate_portfolio_data.py   # writes landing/private/portfolio_data.json (~4 MB)
+python landing/generate_portfolio_data.py   # writes landing/private/portfolio_data.json (~7 MB)
 ```
 
 The payload lives in `landing/private/`, which is committed but **never served
