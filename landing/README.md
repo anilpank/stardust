@@ -43,7 +43,7 @@ That's it — the first pulls the latest code, the second updates the app, resta
 | `app.js` | Ticker lookup, matrix rendering, funnel tracking, signup. |
 | `admin.html` / `admin.js` / `admin.css` | Read-only console: KPIs, funnel, leads, events. |
 | `admin_portfolio.html` / `portfolio.js` / `portfolio.css` | Portfolio console (`/admin/portfolio`): backtest KPIs, SVG charts, trades. |
-| `server.py` | Flask app: serves the page + `/api/signup`, `/api/track`, `/api/demo`, `/api/trades`, `/api/quote`, `/admin`, `/admin/portfolio`. |
+| `server.py` | Flask app: serves the page + `/api/signup`, `/api/track`, `/api/demo`, `/api/trades`, `/api/quote`, `/admin`, `/admin/portfolio`, and the admin-gated `/api/admin/trade/*` shadow-run journal. |
 | `gen_admin_password.py` | Generates an `ADMIN_PASS_HASH` (`salt:hash`) for admin Basic auth. |
 | `generate_demo_data.py` | Runs the real engine → writes `demo_signals.json` + `demo_trades.json`. |
 | `generate_portfolio_data.py` | Runs the portfolio engine → writes `private/portfolio_data.json`. |
@@ -384,18 +384,52 @@ as a static file** (the catch-all route blocks `private/` and `data/` — the
 latter also protects `landing.db`). To change which runs appear, edit
 `DEFAULT_RUNS` in `landing/generate_portfolio_data.py`.
 
+### Shadow-run journal (Phase B)
+
+The live/shadow phase records what the system proposes and what the operator
+actually does, in two append-only tables in `landing.db`:
+
+- **`journal_fills`** — `id, created_at, trade_date, ticker, lane, side, shares,
+  price, source, proposal_id, note` (a real or paper execution).
+- **`journal_decisions`** — `id, created_at, trade_date, proposal_id, action,
+  ticker, lane, side, planned_shares, planned_price, note` (what was done with a
+  proposal: `acted` / `skipped` / `deferred`).
+
+They're written and read through the same Basic-auth guard as the rest of the
+admin API — the server is the **single writer** (the offline snapshot generator
+reads them back through the export endpoint, so there's never a second process
+touching the SQLite file):
+
+| Method | Route | Purpose |
+| --- | --- | --- |
+| `GET` | `/api/admin/trade/fills` | list fills (newest first) |
+| `POST` | `/api/admin/trade/fills` | record a fill |
+| `GET` | `/api/admin/trade/decisions` | list decisions (newest first) |
+| `POST` | `/api/admin/trade/decisions` | record a decision |
+| `GET` | `/api/admin/trade/export/fills.csv` | CSV export |
+| `GET` | `/api/admin/trade/export/decisions.csv` | CSV export |
+
+Fill posts are validated (`ticker` looks like a symbol, `side ∈ {buy,sell}`,
+`shares > 0`, `price > 0`, `trade_date` is `YYYY-MM-DD` and defaults to today,
+`lane ∈ {core,satellite}`, `source ∈ {paper,live}`); decision posts likewise
+(`action ∈ {acted,skipped,deferred}`, non-negative planned shares/price).
+`created_at` is always stamped server-side.
+
 ---
 
 ## What gets recorded
 
 Everything lives in a single SQLite database — `landing.db` under
-`LANDING_DATA_DIR` (default `landing/data/`). Two tables:
+`LANDING_DATA_DIR` (default `landing/data/`). Four tables:
 
 **`signups`** — one row per conversion
 `id, timestamp, email, ticker, source, utm_medium, utm_campaign, referrer, visitor_id, is_return, user_agent, ip`
 
 **`events`** — the funnel
 `id, timestamp, event, ticker, source, visitor_id, is_return, path, referrer, meta`
+
+**`journal_fills`** / **`journal_decisions`** — the portfolio shadow-run journal
+(see the portfolio console section above).
 
 Events: `visit`, `return_visit`, `ticker_lookup`, `signal_view`, `window_detail`,
 `cta_click`, `email_submit`, `signal_unlock`, `wtp_yes` / `wtp_maybe` / `wtp_no`.
