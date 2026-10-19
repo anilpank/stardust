@@ -3,7 +3,7 @@
 **Status:** Active — Phase A engine ✅, backtest console ✅, control experiment ✅,
 `cash_yield` T-bill sleeve ✅, satellite lane **shelved** (PIT validation failed),
 Phase A tuning gate ✅ — `live_config` **frozen** (core-only), gate **PASS**;
-**next: Phase B — shadow-run loop (journal ✅ → snapshot → live console).**
+**next: Phase B — shadow-run loop (journal ✅ → snapshot ✅ → live console).**
 **Date:** October 2026
 **Owner:** Anil
 **Scope:** A personal, admin-gated trading system for a $10K–$20K account: good
@@ -16,10 +16,11 @@ serves the operator only. (Related but separate: `PAID_PRODUCT_PLAN.md`,
 
 ## Resume here (next session)
 
-Steps 1–4 are done and merged to `main`. The frozen core-only config is committed
-at `thermaltrend/portfolio/live_config.json` and surfaced as the
-`live-core-only-10k` run in the console. Everything green: fast unit suite +
-landing tests pass. Pick up with **Phase B (step 5 below)**:
+Steps 1–6 are done and merged to `main`; step 7 (snapshot generator) is on branch
+`feat/phase-b-snapshot`. The frozen core-only config is committed at
+`thermaltrend/portfolio/live_config.json` and surfaced as the `live-core-only-10k`
+run in the console. Everything green: fast unit suite + landing tests pass. Pick
+up with **Phase B step 8 (live console)**:
 
 1. ✅ **`cash_yield` added to the engine** — `PortfolioConfig.cash_yield` (annual,
    default `0.0`, validated `>= 0`) accrues on the **idle cash** balance
@@ -51,8 +52,10 @@ landing tests pass. Pick up with **Phase B (step 5 below)**:
    the most-recent-refit winner to `live_config.json`: `core_target_weight 0.25`,
    `core_momentum_lookback 189`, `breaker_pct 0.04` (full history 6.0% CAGR,
    −3.7% worst-12M, Calmar 0.74) — gate **PASS**. See the tuning-gate table below.
-5. **Next** Phase B (steps 6–9): shadow-run loop — journal tables + guarded admin
-   API, offline snapshot generator, and the live half of `/admin/portfolio`.
+5. **Next** Phase B step 8 — the live half of `/admin/portfolio`: today's KPI
+   cards (equity, day P&L, adherence %), positions table with stops, the
+   next-session proposal with Acted/Skipped + a fill form posting to
+   `/api/admin/trade/*`, and a trade log fed by the snapshot's `fills`.
 6. ✅ **Journal tables + guarded API** (step 6, branch `feat/phase-b-journal`):
    append-only `journal_fills` / `journal_decisions` in `landing.db`, with
    admin-gated `GET/POST /api/admin/trade/fills`, `GET/POST
@@ -62,6 +65,18 @@ landing tests pass. Pick up with **Phase B (step 5 below)**:
    side). The server stays the single SQLite writer; step 7's generator reads the
    journal back through the export endpoint. `landing/tests/test_server.py`
    covers auth, validation, persistence, ordering and CSV.
+7. ✅ **Snapshot generator** (step 7, branch `feat/phase-b-snapshot`):
+   `landing/generate_portfolio_snapshot.py` runs the frozen core-only model
+   (`live_config.json`) as what the system *would* do, loads the journal (HTTP
+   export endpoints with admin creds from env, or a local dir), replays fills
+   into a live ledger marked to market from the committed Parquet, and writes
+   committed `landing/private/portfolio_snapshot.json`: `as_of`, `config`,
+   `model`/`live` ledgers (equity, metrics, positions, cash), the next-session
+   `proposal` (or `null`), `adherence` (decision counts, `acted_pct`, exposure
+   match, rejected fills) and a flattened `fills` log. **`paper` mode** treats
+   the model's core trades as the paper fills (no journal required); **`live`
+   mode** replays the operator's journal fills. Tests:
+   `landing/tests/test_generate_portfolio_snapshot.py`.
 
 Open questions to settle along the way: whether banked principal should earn a
 *historical* T-bill rate (era-accurate) rather than a flat 4%; whether the
@@ -245,12 +260,14 @@ breaker_pct`.*
    "Resume here" item 6; the server is the single writer, and the tables are
    created idempotently on startup (`CREATE TABLE IF NOT EXISTS`), so existing
    `landing.db` files upgrade in place.
-7. **Offline snapshot generator** (mirrors `landing/generate_demo_data.py` —
+7. ✅ **Offline snapshot generator** (mirrors `landing/generate_demo_data.py` —
    the server never runs the engine): pulls the journal via the export endpoint,
    replays fills into positions, marks to market from local Parquet, computes
-   sleeves/equity/metrics/adherence, auto-generates paper fills at next-day open
-   (live fills entered manually), writes committed
-   `landing/portfolio_snapshot.json` + today's proposals.
+   model/live equity/metrics/adherence, derives paper fills from the model (live
+   fills entered manually), writes committed
+   `landing/private/portfolio_snapshot.json` + the next-session proposal. The
+   live ledger starts at the first fill (no flat pre-history) and reports
+   rejected fills (sells with no position, non-positive price/shares).
 8. **Admin console** `/admin/portfolio` on the landing stack (Flask + static
    HTML/JS/CSS, same Basic auth; hand-rolled SVG — no chart dependency):
    **backtest viewer done** — run selector, KPI cards, equity-vs-SPY chart,

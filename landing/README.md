@@ -47,11 +47,12 @@ That's it — the first pulls the latest code, the second updates the app, resta
 | `gen_admin_password.py` | Generates an `ADMIN_PASS_HASH` (`salt:hash`) for admin Basic auth. |
 | `generate_demo_data.py` | Runs the real engine → writes `demo_signals.json` + `demo_trades.json`. |
 | `generate_portfolio_data.py` | Runs the portfolio engine → writes `private/portfolio_data.json`. |
+| `generate_portfolio_snapshot.py` | Shadow-run loop: runs the frozen model, reads the journal, writes `private/portfolio_snapshot.json`. |
 | `demo_signals.json` | Pre-computed winning strategy per ticker × timeframe + OOS badge, latest close, and each call's signal date/price/return-since. |
 | `demo_trades.json` | Pre-computed actual trades per ticker × timeframe (powers the drill-down). |
 | `generate_ticker_index.py` | Builds `tickers.json` (ticker → company name) from the membership table. |
 | `tickers.json` | Offline name index so visitors can search by company name. |
-| `private/` | Committed admin-only payloads (`portfolio_data.json`); never served statically. |
+| `private/` | Committed admin-only payloads (`portfolio_data.json`, `portfolio_snapshot.json`); never served statically. |
 | `requirements.txt`, `Dockerfile` | Deployment. |
 | `deploy/provision.sh` | Idempotent Amazon Linux 2023 provisioner (systemd + nginx + certbot + backups). |
 | `deploy/backup_db.py` | Daily `VACUUM INTO` DB snapshot + pruning (systemd timer). |
@@ -414,6 +415,34 @@ Fill posts are validated (`ticker` looks like a symbol, `side ∈ {buy,sell}`,
 `lane ∈ {core,satellite}`, `source ∈ {paper,live}`); decision posts likewise
 (`action ∈ {acted,skipped,deferred}`, non-negative planned shares/price).
 `created_at` is always stamped server-side.
+
+### Snapshot generator
+
+`landing/generate_portfolio_snapshot.py` turns the journal into the daily brief
+the live half of `/admin/portfolio` will render (step 8). It runs the **frozen
+core-only model** (`thermaltrend/portfolio/live_config.json`) as what the system
+*would* do, loads the operator's journal through the guarded export endpoints
+(or a local dir), replays the fills into a **live ledger** marked to market from
+the committed Parquet, and writes committed
+`landing/private/portfolio_snapshot.json` (never served statically):
+
+```bash
+# from the repo root
+python landing/generate_portfolio_snapshot.py                       # paper mode
+python landing/generate_portfolio_snapshot.py --mode live \
+  --base-url http://127.0.0.1:8000            # ADMIN_USER/ADMIN_PASSWORD from env
+python landing/generate_portfolio_snapshot.py --journal-dir /tmp/journal   # offline
+```
+
+- **Modes.** `paper` (default) treats the model's own core trades as the paper
+  fills, so the live ledger *is* the model's path and no journal is needed.
+  `live` replays the operator's journal fills; live fills are entered manually.
+- **Payload.** `as_of`, the frozen `config`, `model` and `live` ledgers
+  (equity/dates, metrics, positions, cash), the next-session `proposal`
+  (or `null` for hold), `adherence` (journal fill/decision counts, `acted_pct`,
+  exposure match, rejected fills), and the flattened `fills` log.
+- The server never runs the engine at request time — same pattern as
+  `generate_portfolio_data.py`. Regenerate after refreshing price data.
 
 ---
 
