@@ -91,6 +91,23 @@ EVENT_FIELDS = [
     "path", "referrer", "meta",
 ]
 
+# The portfolio shadow-run journal (Phase B): append-only records of the
+# operator's decisions on each proposal and the fills that actually happened.
+# The server is the single writer; the offline snapshot generator reads these
+# back through the guarded export endpoints.
+JOURNAL_FILL_FIELDS = [
+    "created_at", "trade_date", "ticker", "lane", "side", "shares",
+    "price", "source", "proposal_id", "note",
+]
+JOURNAL_DECISION_FIELDS = [
+    "created_at", "trade_date", "proposal_id", "action", "ticker", "lane",
+    "side", "planned_shares", "planned_price", "note",
+]
+SIDE_CHOICES = ("buy", "sell")
+LANE_CHOICES = ("core", "satellite")
+SOURCE_CHOICES = ("paper", "live")
+ACTION_CHOICES = ("acted", "skipped", "deferred")
+
 # Columns are stored as TEXT; rows are returned as plain dicts so the summary,
 # CSV export, and JSON API all share one shape.
 SCHEMA = """
@@ -120,9 +137,38 @@ CREATE TABLE IF NOT EXISTS events (
     referrer TEXT NOT NULL DEFAULT '',
     meta TEXT NOT NULL DEFAULT ''
 );
+CREATE TABLE IF NOT EXISTS journal_fills (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TEXT NOT NULL,
+    trade_date TEXT NOT NULL DEFAULT '',
+    ticker TEXT NOT NULL DEFAULT '',
+    lane TEXT NOT NULL DEFAULT 'core',
+    side TEXT NOT NULL DEFAULT '',
+    shares INTEGER NOT NULL DEFAULT 0,
+    price REAL NOT NULL DEFAULT 0,
+    source TEXT NOT NULL DEFAULT 'paper',
+    proposal_id TEXT NOT NULL DEFAULT '',
+    note TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS journal_decisions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TEXT NOT NULL,
+    trade_date TEXT NOT NULL DEFAULT '',
+    proposal_id TEXT NOT NULL DEFAULT '',
+    action TEXT NOT NULL DEFAULT '',
+    ticker TEXT NOT NULL DEFAULT '',
+    lane TEXT NOT NULL DEFAULT 'core',
+    side TEXT NOT NULL DEFAULT '',
+    planned_shares INTEGER NOT NULL DEFAULT 0,
+    planned_price REAL NOT NULL DEFAULT 0,
+    note TEXT NOT NULL DEFAULT ''
+);
 CREATE INDEX IF NOT EXISTS idx_signups_ticker ON signups(ticker);
 CREATE INDEX IF NOT EXISTS idx_events_event ON events(event);
 CREATE INDEX IF NOT EXISTS idx_events_ticker ON events(ticker);
+CREATE INDEX IF NOT EXISTS idx_journal_fills_ticker ON journal_fills(ticker);
+CREATE INDEX IF NOT EXISTS idx_journal_fills_date ON journal_fills(trade_date);
+CREATE INDEX IF NOT EXISTS idx_journal_decisions_proposal ON journal_decisions(proposal_id);
 """
 
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -186,15 +232,23 @@ def _open() -> sqlite3.Connection:
     return conn
 
 
-def _insert(table: str, fields: list[str], row: dict) -> None:
+def _insert_row(table: str, fields: list[str], row: dict) -> int:
+    """Insert one row and return its ``rowid``."""
     conn = _open()
     try:
         cols = ", ".join(fields)
         placeholders = ", ".join(":" + f for f in fields)
         with conn:
-            conn.execute(f"INSERT INTO {table} ({cols}) VALUES ({placeholders})", row)
+            cur = conn.execute(
+                f"INSERT INTO {table} ({cols}) VALUES ({placeholders})", row
+            )
+            return cur.lastrowid
     finally:
         conn.close()
+
+
+def _insert(table: str, fields: list[str], row: dict) -> None:
+    _insert_row(table, fields, row)
 
 
 def _read(table: str, fields: list[str]) -> list[dict]:
@@ -229,6 +283,108 @@ def _bool(value) -> str:
     if isinstance(value, bool):
         return "true" if value else "false"
     return "true" if str(value).strip().lower() in {"1", "true", "yes"} else "false"
+
+
+def _parse_trade_date(value) -> str:
+    """Normalise an execution date to YYYY-MM-DD; default to today (UTC).
+
+    Returns "" for a malformed date so callers can reject it.
+    """
+    text = str(value or "").strip()
+    if not text:
+        return datetime.now(timezone.utc).date().isoformat()
+    try:
+        return datetime.strptime(text, "%Y-%m-%d").date().isoformat()
+    except ValueError:
+        return ""
+
+
+def _int_field(value) -> int | None:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _float_field(value) -> float | None:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _fill_from_payload(data: dict) -> tuple[dict | None, str | None]:
+    """Validate and normalise a posted fill into a journal row."""
+    ticker = str(data.get("ticker", "")).strip().upper()
+    if not _TICKER_RE.match(ticker):
+        return None, "ticker is required and must look like a symbol"
+    side = str(data.get("side", "")).strip().lower()
+    if side not in SIDE_CHOICES:
+        return None, "side must be 'buy' or 'sell'"
+    shares = _int_field(data.get("shares"))
+    if shares is None or shares <= 0:
+        return None, "shares must be a positive integer"
+    price = _float_field(data.get("price"))
+    if price is None or price <= 0:
+        return None, "price must be a positive number"
+    trade_date = _parse_trade_date(data.get("trade_date"))
+    if not trade_date:
+        return None, "trade_date must be YYYY-MM-DD"
+    lane = str(data.get("lane", "core")).strip().lower() or "core"
+    if lane not in LANE_CHOICES:
+        return None, "lane must be 'core' or 'satellite'"
+    source = str(data.get("source", "paper")).strip().lower() or "paper"
+    if source not in SOURCE_CHOICES:
+        return None, "source must be 'paper' or 'live'"
+    return {
+        "created_at": _now(),
+        "trade_date": trade_date,
+        "ticker": ticker,
+        "lane": lane,
+        "side": side,
+        "shares": shares,
+        "price": price,
+        "source": source,
+        "proposal_id": str(data.get("proposal_id", "")).strip(),
+        "note": str(data.get("note", "")).strip(),
+    }, None
+
+
+def _decision_from_payload(data: dict) -> tuple[dict | None, str | None]:
+    """Validate and normalise a posted decision into a journal row."""
+    action = str(data.get("action", "")).strip().lower()
+    if action not in ACTION_CHOICES:
+        return None, "action must be 'acted', 'skipped' or 'deferred'"
+    ticker = str(data.get("ticker", "")).strip().upper()
+    if not _TICKER_RE.match(ticker):
+        return None, "ticker is required and must look like a symbol"
+    side = str(data.get("side", "")).strip().lower()
+    if side not in SIDE_CHOICES:
+        return None, "side must be 'buy' or 'sell'"
+    trade_date = _parse_trade_date(data.get("trade_date"))
+    if not trade_date:
+        return None, "trade_date must be YYYY-MM-DD"
+    planned_shares = _int_field(data.get("planned_shares", 0))
+    if planned_shares is None or planned_shares < 0:
+        return None, "planned_shares must be a non-negative integer"
+    planned_price = _float_field(data.get("planned_price", 0))
+    if planned_price is None or planned_price < 0:
+        return None, "planned_price must be a non-negative number"
+    lane = str(data.get("lane", "core")).strip().lower() or "core"
+    if lane not in LANE_CHOICES:
+        return None, "lane must be 'core' or 'satellite'"
+    return {
+        "created_at": _now(),
+        "trade_date": trade_date,
+        "proposal_id": str(data.get("proposal_id", "")).strip(),
+        "action": action,
+        "ticker": ticker,
+        "lane": lane,
+        "side": side,
+        "planned_shares": planned_shares,
+        "planned_price": planned_price,
+        "note": str(data.get("note", "")).strip(),
+    }, None
 
 
 def _to_csv(fields: list[str], rows: list[dict]) -> str:
@@ -614,6 +770,77 @@ def admin_export(name: str):
         _to_csv(fields, _read(table, fields)),
         mimetype="text/csv",
         headers={"Content-Disposition": f"attachment; filename={name}", "Cache-Control": "no-store"},
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Shadow-run journal — the operator's decisions and executed fills. Append-only;
+# the offline snapshot generator reads it back through these guarded endpoints.
+# --------------------------------------------------------------------------- #
+@app.get("/api/admin/trade/fills")
+def admin_journal_fills():
+    guard = _admin_guard()
+    if guard:
+        return guard
+    rows = _read("journal_fills", JOURNAL_FILL_FIELDS)
+    return jsonify({"ok": True, "count": len(rows), "fills": rows})
+
+
+@app.post("/api/admin/trade/fills")
+def admin_journal_fill_create():
+    guard = _admin_guard()
+    if guard:
+        return guard
+    row, error = _fill_from_payload(_payload())
+    if error:
+        return jsonify({"ok": False, "error": error}), 400
+    row_id = _insert_row("journal_fills", JOURNAL_FILL_FIELDS, row)
+    return jsonify({"ok": True, "id": row_id, "fill": {"id": row_id, **row}}), 201
+
+
+@app.get("/api/admin/trade/decisions")
+def admin_journal_decisions():
+    guard = _admin_guard()
+    if guard:
+        return guard
+    rows = _read("journal_decisions", JOURNAL_DECISION_FIELDS)
+    return jsonify({"ok": True, "count": len(rows), "decisions": rows})
+
+
+@app.post("/api/admin/trade/decisions")
+def admin_journal_decision_create():
+    guard = _admin_guard()
+    if guard:
+        return guard
+    row, error = _decision_from_payload(_payload())
+    if error:
+        return jsonify({"ok": False, "error": error}), 400
+    row_id = _insert_row("journal_decisions", JOURNAL_DECISION_FIELDS, row)
+    return jsonify({"ok": True, "id": row_id, "decision": {"id": row_id, **row}}), 201
+
+
+_JOURNAL_EXPORTS = {
+    "fills.csv": (JOURNAL_FILL_FIELDS, "journal_fills"),
+    "decisions.csv": (JOURNAL_DECISION_FIELDS, "journal_decisions"),
+}
+
+
+@app.get("/api/admin/trade/export/<name>")
+def admin_journal_export(name: str):
+    guard = _admin_guard()
+    if guard:
+        return guard
+    spec = _JOURNAL_EXPORTS.get(name)
+    if spec is None:
+        return jsonify({"ok": False, "error": "not found"}), 404
+    fields, table = spec
+    return Response(
+        _to_csv(fields, _read(table, fields)),
+        mimetype="text/csv",
+        headers={
+            "Content-Disposition": f"attachment; filename=journal_{name}",
+            "Cache-Control": "no-store",
+        },
     )
 
 

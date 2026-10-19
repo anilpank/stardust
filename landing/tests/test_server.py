@@ -777,3 +777,185 @@ class TestPortfolioRoutes:
         run = data["runs"][0]
         for key in ("id", "label", "config", "metrics", "equity", "daily", "trades"):
             assert key in run
+
+
+class TestJournalFills:
+    def test_requires_auth(self, client):
+        assert client.get("/api/admin/trade/fills").status_code == 401
+        assert client.post("/api/admin/trade/fills", json={}).status_code == 401
+
+    def test_create_and_list(self, client):
+        resp = client.post(
+            "/api/admin/trade/fills",
+            headers=_auth(),
+            json={
+                "trade_date": "2026-10-16",
+                "ticker": "spy",
+                "side": "BUY",
+                "shares": 7,
+                "price": 400.5,
+                "proposal_id": "2026-10-16-core-buy",
+                "note": "filled at open",
+            },
+        )
+        assert resp.status_code == 201
+        body = resp.get_json()
+        assert body["ok"] is True
+        assert body["id"] == 1
+        assert body["fill"]["ticker"] == "SPY"  # normalised to upper
+        assert body["fill"]["side"] == "buy"
+        assert body["fill"]["lane"] == "core"  # defaulted
+        assert body["fill"]["source"] == "paper"  # defaulted
+        assert body["fill"]["created_at"]
+
+        listed = client.get("/api/admin/trade/fills", headers=_auth()).get_json()
+        assert listed["count"] == 1
+        assert listed["fills"][0]["price"] == 400.5
+        assert listed["fills"][0]["proposal_id"] == "2026-10-16-core-buy"
+
+    def test_created_at_is_server_timestamped(self, client):
+        client.post(
+            "/api/admin/trade/fills",
+            headers=_auth(),
+            json={"ticker": "SPY", "side": "buy", "shares": 1, "price": 1.0,
+                  "created_at": "1999-01-01T00:00:00+00:00"},
+        )
+        row = client.get("/api/admin/trade/fills", headers=_auth()).get_json()["fills"][0]
+        assert row["created_at"].startswith("20")
+
+    def test_trade_date_defaults_to_today(self, client):
+        resp = client.post(
+            "/api/admin/trade/fills",
+            headers=_auth(),
+            json={"ticker": "SPY", "side": "buy", "shares": 1, "price": 1.0},
+        )
+        assert resp.status_code == 201
+        assert re.match(r"^\d{4}-\d{2}-\d{2}$", resp.get_json()["fill"]["trade_date"])
+
+    def test_newest_first(self, client):
+        for shares in (1, 2):
+            client.post(
+                "/api/admin/trade/fills",
+                headers=_auth(),
+                json={"ticker": "SPY", "side": "buy", "shares": shares, "price": 1.0},
+            )
+        fills = client.get("/api/admin/trade/fills", headers=_auth()).get_json()["fills"]
+        assert [f["shares"] for f in fills] == [2, 1]
+
+    @pytest.mark.parametrize(
+        "payload, needle",
+        [
+            ({"side": "buy", "shares": 1, "price": 1.0}, "ticker"),
+            ({"ticker": "SPY", "shares": 1, "price": 1.0}, "side"),
+            ({"ticker": "SPY", "side": "hold", "shares": 1, "price": 1.0}, "side"),
+            ({"ticker": "SPY", "side": "buy", "shares": 0, "price": 1.0}, "shares"),
+            ({"ticker": "SPY", "side": "buy", "shares": -3, "price": 1.0}, "shares"),
+            ({"ticker": "SPY", "side": "buy", "shares": "x", "price": 1.0}, "shares"),
+            ({"ticker": "SPY", "side": "buy", "shares": 1, "price": 0}, "price"),
+            ({"ticker": "SPY", "side": "buy", "shares": 1, "price": "abc"}, "price"),
+            ({"ticker": "SPY", "side": "buy", "shares": 1, "price": 1.0,
+              "trade_date": "16/10/2026"}, "trade_date"),
+            ({"ticker": "SPY", "side": "buy", "shares": 1, "price": 1.0,
+              "lane": "hedge"}, "lane"),
+            ({"ticker": "SPY", "side": "buy", "shares": 1, "price": 1.0,
+              "source": "margin"}, "source"),
+        ],
+    )
+    def test_validation_rejects(self, client, payload, needle):
+        resp = client.post("/api/admin/trade/fills", headers=_auth(), json=payload)
+        assert resp.status_code == 400
+        assert needle in resp.get_json()["error"]
+
+
+class TestJournalDecisions:
+    def test_requires_auth(self, client):
+        assert client.get("/api/admin/trade/decisions").status_code == 401
+        assert client.post("/api/admin/trade/decisions", json={}).status_code == 401
+
+    def test_create_and_list(self, client):
+        resp = client.post(
+            "/api/admin/trade/decisions",
+            headers=_auth(),
+            json={
+                "action": "ACTED",
+                "trade_date": "2026-10-16",
+                "proposal_id": "2026-10-16-core-buy",
+                "ticker": "SPY",
+                "side": "buy",
+                "planned_shares": 7,
+                "planned_price": 400.0,
+            },
+        )
+        assert resp.status_code == 201
+        decision = resp.get_json()["decision"]
+        assert decision["action"] == "acted"
+        assert decision["lane"] == "core"
+        assert decision["planned_shares"] == 7
+
+        listed = client.get("/api/admin/trade/decisions", headers=_auth()).get_json()
+        assert listed["count"] == 1
+
+    def test_planned_fields_default_zero(self, client):
+        resp = client.post(
+            "/api/admin/trade/decisions",
+            headers=_auth(),
+            json={"action": "skipped", "ticker": "SPY", "side": "buy"},
+        )
+        assert resp.status_code == 201
+        decision = resp.get_json()["decision"]
+        assert decision["planned_shares"] == 0
+        assert decision["planned_price"] == 0
+
+    @pytest.mark.parametrize(
+        "payload, needle",
+        [
+            ({"ticker": "SPY", "side": "buy"}, "action"),
+            ({"action": "maybe", "ticker": "SPY", "side": "buy"}, "action"),
+            ({"action": "acted", "side": "buy"}, "ticker"),
+            ({"action": "acted", "ticker": "SPY"}, "side"),
+            ({"action": "acted", "ticker": "SPY", "side": "buy",
+              "planned_shares": -1}, "planned_shares"),
+            ({"action": "acted", "ticker": "SPY", "side": "buy",
+              "planned_price": -5}, "planned_price"),
+        ],
+    )
+    def test_validation_rejects(self, client, payload, needle):
+        resp = client.post("/api/admin/trade/decisions", headers=_auth(), json=payload)
+        assert resp.status_code == 400
+        assert needle in resp.get_json()["error"]
+
+
+class TestJournalExport:
+    def test_requires_auth(self, client):
+        assert client.get("/api/admin/trade/export/fills.csv").status_code == 401
+
+    def test_fills_csv(self, client):
+        client.post(
+            "/api/admin/trade/fills",
+            headers=_auth(),
+            json={"trade_date": "2026-10-16", "ticker": "SPY", "side": "buy",
+                  "shares": 7, "price": 400.5},
+        )
+        resp = client.get("/api/admin/trade/export/fills.csv", headers=_auth())
+        assert resp.status_code == 200
+        assert resp.mimetype == "text/csv"
+        assert "journal_fills.csv" in resp.headers["Content-Disposition"]
+        text = resp.data.decode("utf-8").lstrip("\ufeff")
+        rows = list(csv.DictReader(text.splitlines()))
+        assert rows[0]["ticker"] == "SPY"
+        assert rows[0]["shares"] == "7"
+
+    def test_decisions_csv(self, client):
+        client.post(
+            "/api/admin/trade/decisions",
+            headers=_auth(),
+            json={"action": "acted", "ticker": "SPY", "side": "buy",
+                  "planned_shares": 7},
+        )
+        resp = client.get("/api/admin/trade/export/decisions.csv", headers=_auth())
+        assert resp.status_code == 200
+        rows = list(csv.DictReader(resp.data.decode("utf-8").lstrip("\ufeff").splitlines()))
+        assert rows[0]["action"] == "acted"
+
+    def test_unknown_export_404(self, client):
+        assert client.get("/api/admin/trade/export/nope.csv", headers=_auth()).status_code == 404

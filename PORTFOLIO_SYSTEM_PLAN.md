@@ -3,7 +3,7 @@
 **Status:** Active — Phase A engine ✅, backtest console ✅, control experiment ✅,
 `cash_yield` T-bill sleeve ✅, satellite lane **shelved** (PIT validation failed),
 Phase A tuning gate ✅ — `live_config` **frozen** (core-only), gate **PASS**;
-**next: Phase B — shadow-run loop (journal + snapshot + live console).**
+**next: Phase B — shadow-run loop (journal ✅ → snapshot → live console).**
 **Date:** October 2026
 **Owner:** Anil
 **Scope:** A personal, admin-gated trading system for a $10K–$20K account: good
@@ -53,6 +53,15 @@ landing tests pass. Pick up with **Phase B (step 5 below)**:
    −3.7% worst-12M, Calmar 0.74) — gate **PASS**. See the tuning-gate table below.
 5. **Next** Phase B (steps 6–9): shadow-run loop — journal tables + guarded admin
    API, offline snapshot generator, and the live half of `/admin/portfolio`.
+6. ✅ **Journal tables + guarded API** (step 6, branch `feat/phase-b-journal`):
+   append-only `journal_fills` / `journal_decisions` in `landing.db`, with
+   admin-gated `GET/POST /api/admin/trade/fills`, `GET/POST
+   /api/admin/trade/decisions`, and `GET /api/admin/trade/export/<fills|decisions>.csv`.
+   Server-side validation (symbol, side, positive shares/price, `YYYY-MM-DD`
+   date defaulting to today, lane/source choices; `created_at` stamped server
+   side). The server stays the single SQLite writer; step 7's generator reads the
+   journal back through the export endpoint. `landing/tests/test_server.py`
+   covers auth, validation, persistence, ordering and CSV.
 
 Open questions to settle along the way: whether banked principal should earn a
 *historical* T-bill rate (era-accurate) rather than a flat 4%; whether the
@@ -230,9 +239,12 @@ breaker_pct`.*
 
 ### Phase B — Shadow-run loop: journal + snapshot + admin console
 
-6. **Journal tables** in landing SQLite (`journal_fills`, `journal_decisions`,
+6. ✅ **Journal tables** in landing SQLite (`journal_fills`, `journal_decisions`,
    append-only) + guarded `POST/GET /api/admin/trade/*` endpoints and CSV export
-   (all first-line `_admin_guard()`).
+   (all first-line `_admin_guard()`). Schema and validation as described in
+   "Resume here" item 6; the server is the single writer, and the tables are
+   created idempotently on startup (`CREATE TABLE IF NOT EXISTS`), so existing
+   `landing.db` files upgrade in place.
 7. **Offline snapshot generator** (mirrors `landing/generate_demo_data.py` —
    the server never runs the engine): pulls the journal via the export endpoint,
    replays fills into positions, marks to market from local Parquet, computes
