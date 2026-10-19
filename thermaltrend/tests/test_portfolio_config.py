@@ -13,6 +13,7 @@ class TestDefaults:
         assert cfg.capital == 10_000.0
         assert cfg.band_min <= cfg.band_max
         assert cfg.core_ticker == "SPY"
+        assert cfg.cash_yield == 0.0
 
     def test_principal_start_property(self):
         cfg = PortfolioConfig(capital=20_000.0, principal_start_pct=0.6)
@@ -34,6 +35,7 @@ class TestValidation:
             {"min_position_notional": -1.0},
             {"stop_atr_multiple": 0.0},
             {"slippage_bps": -1.0},
+            {"cash_yield": -0.01},
             {"principal_start_pct": 1.5},
             {"ratchet_rate": 2.0},
             {"breaker_pct": 0.0},

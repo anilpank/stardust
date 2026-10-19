@@ -108,6 +108,21 @@ class TestBuildPayload:
         core_only = next(r for r in gen.DEFAULT_RUNS if r["id"] == "core-only-spy-10k")
         assert core_only["satellite"] is False
 
+    def test_default_runs_pair_yield_off_and_tbill(self):
+        from thermaltrend.analytics.metrics import RISK_FREE_RATE
+
+        by_id = {r["id"]: r for r in gen.DEFAULT_RUNS}
+        for base, tbill in (
+            ("ma-crossover-aapl-msft-10k", "ma-crossover-aapl-msft-10k-tbill"),
+            ("core-only-spy-10k", "core-only-spy-10k-tbill"),
+            ("satellite-only-aapl-msft-10k", "satellite-only-aapl-msft-10k-tbill"),
+        ):
+            assert tbill in by_id
+            assert by_id[base].get("config") is None or by_id[base]["config"].cash_yield == 0.0
+            assert by_id[tbill]["config"].cash_yield == RISK_FREE_RATE
+        sat = by_id["satellite-only-aapl-msft-10k-tbill"]["config"]
+        assert sat.core_enabled is False and sat.cash_yield == RISK_FREE_RATE
+
     def test_core_only_spec_serializes_without_strategy(self, data_dir):
         runs = [{"id": "c", "label": "Core only", "satellite": False, "capital": 10_000.0}]
         payload = gen.build_payload(runs=runs, data_dir=data_dir)

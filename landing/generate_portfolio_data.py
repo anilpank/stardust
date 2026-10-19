@@ -23,6 +23,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from thermaltrend.analytics.metrics import RISK_FREE_RATE
 from thermaltrend.portfolio.config import PortfolioConfig
 from thermaltrend.portfolio_backtest import run_portfolio_backtest
 
@@ -37,6 +38,7 @@ DEFAULT_RUNS = [
         "strategy": "ma_crossover",
         "tickers": ["AAPL", "MSFT"],
         "capital": 10_000.0,
+        "start": "1994-01-03",
     },
     {
         "id": "donchian-aapl-msft-nvda-jpm-10k",
@@ -44,6 +46,7 @@ DEFAULT_RUNS = [
         "strategy": "donchian",
         "tickers": ["AAPL", "MSFT", "NVDA", "JPM"],
         "capital": 10_000.0,
+        "start": "1994-01-03",
     },
     {
         "id": "ma-crossover-aapl-msft-20k",
@@ -51,6 +54,7 @@ DEFAULT_RUNS = [
         "strategy": "ma_crossover",
         "tickers": ["AAPL", "MSFT"],
         "capital": 20_000.0,
+        "start": "1994-01-03",
     },
     # Controls that decompose where the return comes from: the same $10K and
     # the same risk overlay, once with the satellite lane switched off and once
@@ -71,6 +75,38 @@ DEFAULT_RUNS = [
         "capital": 10_000.0,
         "start": "1994-01-03",
         "config": replace(PortfolioConfig(), core_enabled=False),
+    },
+    # T-bill effect: the same decomposition with idle cash (including the
+    # principal sleeve) earning the repo's risk-free rate. Side by side with
+    # the yield-off baseline above, this shows how much of the "return" is
+    # simply the cash floor the design specifies but the raw engine omitted.
+    {
+        "id": "ma-crossover-aapl-msft-10k-tbill",
+        "label": "MA crossover · AAPL + MSFT · $10K · T-bill 4%",
+        "strategy": "ma_crossover",
+        "tickers": ["AAPL", "MSFT"],
+        "capital": 10_000.0,
+        "start": "1994-01-03",
+        "config": replace(PortfolioConfig(), cash_yield=RISK_FREE_RATE),
+    },
+    {
+        "id": "core-only-spy-10k-tbill",
+        "label": "Control: SPY core only · no satellite · $10K · T-bill 4%",
+        "satellite": False,
+        "capital": 10_000.0,
+        "start": "1994-01-03",
+        "config": replace(PortfolioConfig(), cash_yield=RISK_FREE_RATE),
+    },
+    {
+        "id": "satellite-only-aapl-msft-10k-tbill",
+        "label": "Control: satellite only · no core · $10K · T-bill 4%",
+        "strategy": "ma_crossover",
+        "tickers": ["AAPL", "MSFT"],
+        "capital": 10_000.0,
+        "start": "1994-01-03",
+        "config": replace(
+            PortfolioConfig(), core_enabled=False, cash_yield=RISK_FREE_RATE
+        ),
     },
 ]
 
