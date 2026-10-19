@@ -24,6 +24,7 @@ from pathlib import Path
 import pandas as pd
 
 from thermaltrend.analytics.metrics import RISK_FREE_RATE
+from thermaltrend.backtest import DEFAULT_MEMBERSHIP_PATH
 from thermaltrend.portfolio.config import PortfolioConfig
 from thermaltrend.portfolio_backtest import run_portfolio_backtest
 
@@ -108,9 +109,57 @@ DEFAULT_RUNS = [
             PortfolioConfig(), core_enabled=False, cash_yield=RISK_FREE_RATE
         ),
     },
+    # Point-in-time validation of the satellite lane (step 3). The hindsight
+    # tickers above flatter the satellite sleeve; run over the full membership
+    # universe instead and it is value-destroying, so the lane is shelved and
+    # core-only is the base. See the control-experiment table in the plan.
+    {
+        "id": "pit-full-ma-crossover-10k-tbill",
+        "label": "PIT full — MA crossover · $10K · T-bill 4%",
+        "strategy": "ma_crossover",
+        "capital": 10_000.0,
+        "start": "1994-01-03",
+        "universe": "point_in_time",
+        "config": replace(PortfolioConfig(), cash_yield=RISK_FREE_RATE),
+    },
+    {
+        "id": "pit-satellite-only-ma-crossover-10k-tbill",
+        "label": "PIT satellite only — MA crossover · $10K · T-bill 4%",
+        "strategy": "ma_crossover",
+        "capital": 10_000.0,
+        "start": "1994-01-03",
+        "universe": "point_in_time",
+        "config": replace(
+            PortfolioConfig(), core_enabled=False, cash_yield=RISK_FREE_RATE
+        ),
+    },
+    {
+        "id": "pit-full-donchian-10k-tbill",
+        "label": "PIT full — Donchian · $10K · T-bill 4%",
+        "strategy": "donchian",
+        "capital": 10_000.0,
+        "start": "1994-01-03",
+        "universe": "point_in_time",
+        "config": replace(PortfolioConfig(), cash_yield=RISK_FREE_RATE),
+    },
+    {
+        "id": "pit-satellite-only-donchian-10k-tbill",
+        "label": "PIT satellite only — Donchian · $10K · T-bill 4%",
+        "strategy": "donchian",
+        "capital": 10_000.0,
+        "start": "1994-01-03",
+        "universe": "point_in_time",
+        "config": replace(
+            PortfolioConfig(), core_enabled=False, cash_yield=RISK_FREE_RATE
+        ),
+    },
 ]
 
 _REGIME_CODES = {"bull": "b", "bear": "r", "sideways": "s"}
+
+
+def _membership_tickers(path: str | Path = DEFAULT_MEMBERSHIP_PATH) -> list[str]:
+    return sorted(pd.read_csv(path)["ticker"].unique())
 
 
 def _jsonable(value):
@@ -215,13 +264,18 @@ def build_payload(
         core_ticker = (run_config or PortfolioConfig()).core_ticker
         if core_ticker not in core_cache:
             core_cache[core_ticker] = _load_core_closes(data_dir, core_ticker)
+        tickers = list(spec.get("tickers") or [])
+        universe = spec.get("universe", "current")
+        if universe == "point_in_time" and not tickers:
+            tickers = _membership_tickers()
         result = run_portfolio_backtest(
             strategy_name=spec.get("strategy"),
-            tickers=list(spec.get("tickers") or []),
+            tickers=tickers,
             start_date=spec.get("start"),
             end_date=spec.get("end"),
             params=spec.get("params"),
             data_dir=str(data_dir),
+            universe=universe,
             config=run_config,
             capital=spec.get("capital"),
             satellite=spec.get("satellite", True),
