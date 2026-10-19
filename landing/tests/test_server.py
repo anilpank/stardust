@@ -779,6 +779,40 @@ class TestPortfolioRoutes:
             assert key in run
 
 
+class TestPortfolioSnapshotRoutes:
+    def test_snapshot_requires_auth(self, client):
+        assert client.get("/api/admin/portfolio/snapshot").status_code == 401
+
+    def test_snapshot_missing_file(self, client, tmp_path, monkeypatch):
+        monkeypatch.setattr(server, "SNAPSHOT_JSON", tmp_path / "absent.json")
+        resp = client.get("/api/admin/portfolio/snapshot", headers=_auth())
+        assert resp.status_code == 404
+        assert resp.get_json()["available"] is False
+
+    def test_snapshot_served_with_auth(self, client, tmp_path, monkeypatch):
+        payload = {
+            "generated_at": "2026-10-18T00:00:00+00:00",
+            "as_of": "2026-10-16", "mode": "paper",
+            "model": {"equity": {"dates": [], "values": []}, "metrics": {}},
+            "live": {"equity": {"dates": [], "values": []}, "metrics": {}, "positions": []},
+            "proposal": None, "adherence": {}, "fills": [],
+        }
+        path = tmp_path / "portfolio_snapshot.json"
+        path.write_text(json.dumps(payload), encoding="utf-8")
+        monkeypatch.setattr(server, "SNAPSHOT_JSON", path)
+        resp = client.get("/api/admin/portfolio/snapshot", headers=_auth())
+        assert resp.status_code == 200
+        assert resp.headers["Cache-Control"] == "no-store"
+        assert resp.get_json()["mode"] == "paper"
+
+    def test_snapshot_not_in_public_static(self, client):
+        assert client.get("/private/portfolio_snapshot.json").status_code == 404
+
+    def test_portfolio_page_loads_live_script(self, client):
+        resp = client.get("/admin/portfolio", headers=_auth())
+        assert b"/live.js" in resp.data
+
+
 class TestJournalFills:
     def test_requires_auth(self, client):
         assert client.get("/api/admin/trade/fills").status_code == 401
