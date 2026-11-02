@@ -343,4 +343,5 @@ table.trades td.neg { color: var(--danger); }
   .hero { padding: 48px 0 40px; }
   .btn { width: 100%; }
   .field-row { flex-direction: column; }
+  .topbar .tag { font-size: 0.65rem; padding: 3px 7px; }
 }

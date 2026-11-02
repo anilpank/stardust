@@ -242,6 +242,12 @@ class TestLegalPages:
 
     BASE = Path(__file__).resolve().parent.parent
 
+    def test_header_badge_is_educational_and_not_advice(self):
+        for page in ("index.html", "privacy.html", "terms.html"):
+            html = (self.BASE / page).read_text(encoding="utf-8")
+            assert "Educational research" in html, page
+            assert "Not advice" in html, page
+
     def test_index_links_to_privacy_and_terms(self):
         html = (self.BASE / "index.html").read_text(encoding="utf-8")
         assert 'href="/privacy"' in html
