@@ -39,12 +39,13 @@ That's it — the first pulls the latest code, the second updates the app, resta
 | File | Purpose |
 |------|---------|
 | `index.html` | The page (hero → problem → how it works → why → offer). |
+| `privacy.html` / `terms.html` | stardust-specific privacy policy and terms of use, linked from the footer and served at `/privacy` and `/terms`. |
 | `styles.css` | Styling (dark fintech theme, responsive). |
 | `app.js` | Ticker lookup, matrix rendering, funnel tracking, signup. |
 | `admin.html` / `admin.js` / `admin.css` | Read-only console: KPIs, funnel, leads, events. |
 | `admin_portfolio.html` / `portfolio.js` / `portfolio.css` | Portfolio console (`/admin/portfolio`): live shadow run + backtest KPIs, SVG charts, trades. |
 | `live.js` | Live half of the console: snapshot KPIs, proposal + Acted/Skipped form, positions, journal log. |
-| `server.py` | Flask app: serves the page + `/api/signup`, `/api/track`, `/api/demo`, `/api/trades`, `/api/quote`, `/admin`, `/admin/portfolio`, and the admin-gated `/api/admin/trade/*` shadow-run journal. |
+| `server.py` | Flask app: serves the page, `/privacy`, `/terms`, `/api/signup`, `/api/track`, `/api/demo`, `/api/trades`, `/api/quote`, `/admin`, `/admin/portfolio`, and the admin-gated `/api/admin/trade/*` shadow-run journal. |
 | `gen_admin_password.py` | Generates an `ADMIN_PASS_HASH` (`salt:hash`) for admin Basic auth. |
 | `generate_demo_data.py` | Runs the real engine → writes `demo_signals.json` + `demo_trades.json`. |
 | `generate_portfolio_data.py` | Runs the portfolio engine → writes `private/portfolio_data.json`. |
@@ -624,7 +625,8 @@ which flows into both the signups and events tables so you can attribute convers
    still captures an email ("we'll send the report when ready"), so unknown
    tickers are not dead ends.
 4. **Compliance language** — keep it as research/educational. Review the footer
-   disclaimer before publishing.
+   disclaimer and the `/privacy` and `/terms` pages with a qualified professional
+   before publishing.
 
 ---
 

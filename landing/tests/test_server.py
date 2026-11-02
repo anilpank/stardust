@@ -157,6 +157,17 @@ class TestStaticRoutes:
         assert resp.status_code == 200
         assert b"experiment console" in resp.data
 
+    def test_privacy_page_served(self, client):
+        resp = client.get("/privacy")
+        assert resp.status_code == 200
+        assert b"Privacy Policy" in resp.data
+
+    def test_terms_page_served(self, client):
+        resp = client.get("/terms")
+        assert resp.status_code == 200
+        assert b"Terms of Use" in resp.data
+        assert b"educational and research purposes only" in resp.data
+
     def test_static_asset_served(self, client):
         assert client.get("/styles.css").status_code == 200
 

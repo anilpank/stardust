@@ -237,6 +237,53 @@ class TestPortfolioConsoleAssets:
         assert "noindex" in self.PAGE.read_text(encoding="utf-8")
 
 
+class TestLegalPages:
+    """Guard the privacy and terms links and the required launch disclaimers."""
+
+    BASE = Path(__file__).resolve().parent.parent
+
+    def test_header_badge_is_educational_and_not_advice(self):
+        for page in ("index.html", "privacy.html", "terms.html"):
+            html = (self.BASE / page).read_text(encoding="utf-8")
+            assert "Educational research" in html, page
+            assert "Not advice" in html, page
+
+    def test_index_links_to_privacy_and_terms(self):
+        html = (self.BASE / "index.html").read_text(encoding="utf-8")
+        assert 'href="/privacy"' in html
+        assert 'href="/terms"' in html
+
+    def test_pages_link_to_each_other_and_home(self):
+        privacy = (self.BASE / "privacy.html").read_text(encoding="utf-8")
+        terms = (self.BASE / "terms.html").read_text(encoding="utf-8")
+        assert 'href="/terms"' in privacy
+        assert 'href="/"' in privacy
+        assert 'href="/privacy"' in terms
+        assert 'href="/"' in terms
+
+    def test_terms_has_educational_and_liability_language(self):
+        terms = (self.BASE / "terms.html").read_text(encoding="utf-8")
+        for phrase in (
+            "educational and research purposes only",
+            "not investment advice",
+            "not responsible for any loss",
+            "Limitation of liability",
+            "Governing law",
+        ):
+            assert phrase in terms, phrase
+
+    def test_privacy_covers_the_data_the_server_stores(self):
+        privacy = (self.BASE / "privacy.html").read_text(encoding="utf-8")
+        for phrase in (
+            "email address",
+            "IP address",
+            "local storage",
+            "24 months",
+            "Privacy Policy",
+        ):
+            assert phrase in privacy, phrase
+
+
 class TestAdminSubpathAssets:
     """Admin pages served at a sub-path must load assets from the site root.
 
@@ -246,7 +293,10 @@ class TestAdminSubpathAssets:
     """
 
     BASE = Path(__file__).resolve().parent.parent
-    PAGES = ("index.html", "admin.html", "admin_portfolio.html")
+    PAGES = (
+        "index.html", "admin.html", "admin_portfolio.html",
+        "privacy.html", "terms.html",
+    )
     ROOT = re.compile(r"^/")
 
     @pytest.mark.parametrize("page", PAGES)
