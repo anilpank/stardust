@@ -54,6 +54,7 @@ h3 { font-size: 1.05rem; }
 }
 .topbar .wrap { display: flex; align-items: center; justify-content: space-between; height: 56px; }
 .brand { font-weight: 700; letter-spacing: 0.02em; }
+.topbar .brand { color: var(--text); text-decoration: none; }
 .tag {
   font-size: 0.72rem; color: var(--muted); border: 1px solid var(--border);
   padding: 3px 9px; border-radius: 999px; text-transform: uppercase; letter-spacing: 0.08em;
@@ -310,6 +311,26 @@ table.trades td.neg { color: var(--danger); }
 .combo-item:hover, .combo-item.active { background: rgba(52, 211, 153, 0.13); }
 .combo-ticker { font-weight: 700; letter-spacing: 0.02em; min-width: 56px; color: var(--text); }
 .combo-name { color: var(--muted); font-size: 0.9rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ---------- legal pages ---------- */
+.legal { padding: 52px 0 64px; }
+.legal h1 { margin-bottom: 6px; }
+.legal .legal-meta { color: var(--muted); font-size: 0.85rem; margin: 0 0 28px; }
+.legal h2 { font-size: 1.1rem; margin: 30px 0 8px; }
+.legal p, .legal li { color: var(--muted); }
+.legal strong { color: var(--text); }
+.legal ul { padding-left: 20px; }
+.legal li { margin: 6px 0; }
+.legal code { color: var(--text); }
+.legal .legal-note {
+  border-left: 3px solid var(--accent); background: rgba(52, 211, 153, 0.07);
+  border-radius: 0 10px 10px 0; padding: 14px 18px; color: var(--text);
+  margin: 24px 0;
+}
+.legal-footer {
+  border-top: 1px solid var(--border); margin-top: 44px; padding-top: 20px;
+  color: var(--muted); font-size: 0.85rem;
+}
 
 /* ---------- footer ---------- */
 .footer { border-top: 1px solid var(--border); padding: 34px 0 48px; }

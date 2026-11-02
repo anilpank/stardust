@@ -883,6 +883,16 @@ def admin_db():
     )
 
 
+@app.get("/privacy")
+def privacy():
+    return send_from_directory(BASE_DIR, "privacy.html")
+
+
+@app.get("/terms")
+def terms():
+    return send_from_directory(BASE_DIR, "terms.html")
+
+
 @app.get("/")
 def index():
     return send_from_directory(BASE_DIR, "index.html")
